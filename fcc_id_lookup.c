@@ -371,7 +371,10 @@ static bool fcc_db_read_scaled_uleb(FccDb* db, uint32_t* offset, uint32_t end, u
     if(!fcc_db_read_uleb(db, offset, end, &encoded)) return false;
     uint8_t scale_id = encoded & 0x07U;
     if(scale_id >= COUNT_OF(fcc_interval_scales)) return false;
-    *value = (encoded >> 3) * fcc_interval_scales[scale_id];
+    uint32_t scale = fcc_interval_scales[scale_id];
+    uint64_t magnitude = encoded >> 3;
+    if(scale != 0 && magnitude > UINT64_MAX / scale) return false;
+    *value = magnitude * scale;
     return true;
 }
 
@@ -422,6 +425,10 @@ static bool fcc_db_code_range_for_prefix(
 }
 
 static bool fcc_db_decode_intervals(FccDb* db, FccLookupResult* result, const FccRecord* record) {
+    // A corrupt record could point its interval block outside the interval
+    // region; keep the truncated 32-bit offset inside the file rather than
+    // wrapping and decoding an unrelated part of the database.
+    if(record->interval_offset > db->header.interval_size) return false;
     uint32_t offset = (uint32_t)(db->header.interval_offset + record->interval_offset);
     uint32_t end = (uint32_t)(db->header.interval_offset + db->header.interval_size);
     uint64_t previous_lower = 0;
@@ -433,7 +440,9 @@ static bool fcc_db_decode_intervals(FccDb* db, FccLookupResult* result, const Fc
         uint64_t span;
         if(!fcc_db_read_scaled_uleb(db, &offset, end, &lower_delta)) return false;
         if(!fcc_db_read_scaled_uleb(db, &offset, end, &span)) return false;
+        if(lower_delta > UINT64_MAX - previous_lower) return false;
         uint64_t lower = previous_lower + lower_delta;
+        if(span > UINT64_MAX - lower) return false;
         uint64_t upper = lower + span;
         previous_lower = lower;
         if(result->interval_count < FCC_MAX_INTERVALS) {
@@ -469,10 +478,13 @@ static bool fcc_applicant_append(char* output, size_t output_size, size_t* used,
 }
 
 static bool fcc_db_read_applicant(FccDb* db, uint32_t relative_offset, char* output, size_t output_size) {
-    uint32_t offset = (uint32_t)db->header.applicant_offset + relative_offset;
-    uint32_t end = (uint32_t)(db->header.applicant_offset + db->header.applicant_size);
     size_t used = 0;
     if(output_size == 0) return false;
+    // A corrupt grantee entry could reference an applicant offset past the
+    // applicant region; bail rather than read an unrelated string.
+    if(relative_offset >= db->header.applicant_size) return false;
+    uint32_t offset = (uint32_t)db->header.applicant_offset + relative_offset;
+    uint32_t end = (uint32_t)(db->header.applicant_offset + db->header.applicant_size);
 
     while(offset < end) {
         uint8_t byte;
