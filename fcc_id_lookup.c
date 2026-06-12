@@ -204,6 +204,7 @@ static size_t fcc_normalize(const char* input, char* output, size_t output_size)
 }
 
 static void fcc_grantee_prefix(const char* normalized, char* output, size_t output_size) {
+    if(output_size == 0) return;
     size_t length = (normalized[0] == '2') ? 5 : 3;
     if(length >= output_size) length = output_size - 1;
     strncpy(output, normalized, length);
