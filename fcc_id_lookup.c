@@ -814,7 +814,11 @@ static void fcc_show_detail(FccApp* app, const FccLookupResult* result, FccView 
             "+%llu more ranges\n",
             (unsigned long long)(result->total_interval_count - result->interval_count));
     }
-    fcc_append(app->detail_text, sizeof(app->detail_text), "\nSource: fccid.io");
+    fcc_append(
+        app->detail_text,
+        sizeof(app->detail_text),
+        "\nData Source:\nhttps://fcc.id/%s",
+        result->fcc_id);
 
     widget_add_text_scroll_element(app->detail_widget, 0, 0, 128, 64, app->detail_text);
     app->detail_back_view = back_view;
