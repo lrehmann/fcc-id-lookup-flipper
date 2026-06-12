@@ -10,5 +10,6 @@ App(
     fap_description="Offline FCC ID applicant and frequency lookup",
     fap_weburl="https://fccid.io",
     fap_icon="fcc_id_lookup_icon.png",
+    fap_file_assets="files",
     sources=["fcc_id_lookup.c"],
 )

@@ -20,7 +20,7 @@
 
 #define TAG "FccIdLookup"
 
-#define FCC_DB_PATH "/ext/apps_data/fcc_id_lookup/fcc_freq_v2.bin"
+#define FCC_DB_PATH APP_ASSETS_PATH("fcc_freq_v2.bin")
 #define FCC_DB_MAGIC "FCCFRQ2"
 #define FCC_DB_VERSION 2U
 #define FCC_DB_HEADER_SIZE 168U
@@ -947,8 +947,8 @@ static bool fcc_ensure_db_open(FccApp* app) {
     fcc_show_message(
         app,
         "Missing or invalid database.\n\n"
-        "Copy fcc_freq_v2.bin to:\n"
-        "/ext/apps_data/fcc_id_lookup/\n\n"
+        "Reinstall the app and ensure\n"
+        "SD card space is available.\n\n"
         "Data from https://fccid.io");
     return false;
 }
