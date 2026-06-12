@@ -21,17 +21,12 @@
 #define TAG "FccIdLookup"
 
 #ifdef FCC_SIDELOAD_DB
-#define FCC_DB_PACK_PATH APP_DATA_PATH("fcc_freq_v2.fcz")
+#define FCC_DB_PATH APP_DATA_PATH("fcc_freq_v2.bin")
 #define FCC_DB_SETUP_HINT "Run deploy_to_flipper.sh to install the database sidecar."
 #else
-#define FCC_DB_PACK_PATH APP_ASSETS_PATH("fcc_freq_v2.fcz")
+#define FCC_DB_PATH APP_ASSETS_PATH("fcc_freq_v2.bin")
 #define FCC_DB_SETUP_HINT "Reinstall the app to restore the bundled database."
 #endif
-#define FCC_DB_PATH APP_DATA_PATH("fcc_freq_v2_cache.bin")
-#define FCC_DB_TMP_PATH APP_DATA_PATH("fcc_freq_v2_cache.tmp")
-#define FCC_DB_PACK_MAGIC "FCCZLZ4"
-#define FCC_DB_PACK_VERSION 1U
-#define FCC_DB_PACK_HEADER_SIZE 28U
 #define FCC_DB_MAGIC "FCCFRQ2"
 #define FCC_DB_VERSION 2U
 #define FCC_DB_HEADER_SIZE 168U
@@ -40,8 +35,6 @@
 #define FCC_PREFIX3_COUNT 46656U
 #define FCC_PREFIX_INDEX_ENTRIES 46657U
 #define FCC_DB_READ_CACHE_SIZE 512U
-#define FCC_LZ4_BLOCK_MAX 16384U
-#define FCC_LZ4_COMPRESSED_BLOCK_MAX (FCC_LZ4_BLOCK_MAX + FCC_LZ4_BLOCK_MAX / 255U + 16U)
 #define FCC_GRANTEE_TWO_OFFSET FCC_PREFIX3_COUNT
 #define FCC_APPLICANT_ESCAPE 31U
 
@@ -450,179 +443,6 @@ static bool fcc_db_read_header(FccDb* db) {
     return true;
 }
 
-static bool fcc_file_read_exact(File* file, void* buffer, size_t size) {
-    return storage_file_read(file, buffer, size) == size;
-}
-
-static bool fcc_file_write_exact(File* file, const void* buffer, size_t size) {
-    return storage_file_write(file, buffer, size) == size;
-}
-
-static bool fcc_lz4_read_u32(File* file, uint32_t* value) {
-    uint8_t bytes[4];
-    if(!fcc_file_read_exact(file, bytes, sizeof(bytes))) return false;
-    *value = fcc_le32(bytes);
-    return true;
-}
-
-static bool fcc_lz4_decode_length(
-    const uint8_t** input,
-    const uint8_t* input_end,
-    size_t* length) {
-    uint8_t add;
-    do {
-        if(*input >= input_end) return false;
-        add = **input;
-        (*input)++;
-        if(*length > SIZE_MAX - add) return false;
-        *length += add;
-    } while(add == 255U);
-
-    return true;
-}
-
-static bool fcc_lz4_decode_block(
-    const uint8_t* input,
-    size_t input_size,
-    uint8_t* output,
-    size_t output_capacity,
-    size_t* output_size) {
-    const uint8_t* input_ptr = input;
-    const uint8_t* input_end = input + input_size;
-    uint8_t* output_ptr = output;
-    uint8_t* output_end = output + output_capacity;
-
-    while(input_ptr < input_end) {
-        uint8_t token = *input_ptr++;
-        size_t literal_length = token >> 4;
-
-        if(literal_length == 15U) {
-            if(!fcc_lz4_decode_length(&input_ptr, input_end, &literal_length)) return false;
-        }
-
-        if((size_t)(input_end - input_ptr) < literal_length) return false;
-        if((size_t)(output_end - output_ptr) < literal_length) return false;
-
-        memcpy(output_ptr, input_ptr, literal_length);
-        input_ptr += literal_length;
-        output_ptr += literal_length;
-
-        if(input_ptr == input_end) {
-            *output_size = output_ptr - output;
-            return true;
-        }
-
-        if((size_t)(input_end - input_ptr) < 2U) return false;
-        size_t match_offset = (size_t)input_ptr[0] | ((size_t)input_ptr[1] << 8);
-        input_ptr += 2;
-        if(match_offset == 0U || match_offset > (size_t)(output_ptr - output)) return false;
-
-        size_t match_length = token & 0x0FU;
-        if(match_length == 15U) {
-            if(!fcc_lz4_decode_length(&input_ptr, input_end, &match_length)) return false;
-        }
-        if(match_length > SIZE_MAX - 4U) return false;
-        match_length += 4U;
-        if((size_t)(output_end - output_ptr) < match_length) return false;
-
-        const uint8_t* match = output_ptr - match_offset;
-        while(match_length--) {
-            *output_ptr++ = *match++;
-        }
-    }
-
-    *output_size = output_ptr - output;
-    return true;
-}
-
-typedef bool (*FccDbPrepareProgressCallback)(void* context, uint32_t done, uint32_t total);
-
-static bool fcc_db_prepare_cache(
-    Storage* storage,
-    FccDbPrepareProgressCallback progress,
-    void* context) {
-    bool ok = false;
-    File* input = storage_file_alloc(storage);
-    File* output = storage_file_alloc(storage);
-    uint8_t* compressed = malloc(FCC_LZ4_COMPRESSED_BLOCK_MAX);
-    uint8_t* decompressed = malloc(FCC_LZ4_BLOCK_MAX);
-
-    if(!input || !output || !compressed || !decompressed) goto cleanup;
-
-    storage_common_mkdir(storage, APP_DATA_PATH(""));
-    storage_common_remove(storage, FCC_DB_TMP_PATH);
-
-    if(!storage_file_open(input, FCC_DB_PACK_PATH, FSAM_READ, FSOM_OPEN_EXISTING)) goto cleanup;
-    if(!storage_file_open(output, FCC_DB_TMP_PATH, FSAM_WRITE, FSOM_CREATE_ALWAYS)) goto cleanup;
-
-    uint8_t pack_header[FCC_DB_PACK_HEADER_SIZE];
-    if(!fcc_file_read_exact(input, pack_header, sizeof(pack_header))) goto cleanup;
-    if(memcmp(pack_header, FCC_DB_PACK_MAGIC, 8U) != 0) goto cleanup;
-
-    uint32_t pack_version = fcc_le32(pack_header + 8U);
-    uint64_t content_size = fcc_le64(pack_header + 12U);
-    uint32_t block_size = fcc_le32(pack_header + 20U);
-    uint32_t block_count = fcc_le32(pack_header + 24U);
-
-    if(pack_version != FCC_DB_PACK_VERSION) goto cleanup;
-    if(content_size != FCC_DB_EXPECTED_SIZE) goto cleanup;
-    if(block_size != FCC_LZ4_BLOCK_MAX) goto cleanup;
-    if(block_count == 0U) goto cleanup;
-    if(progress && !progress(context, 0, block_count)) goto cleanup;
-
-    uint64_t written_total = 0;
-    for(uint32_t block_index = 0; block_index < block_count; block_index++) {
-        uint32_t payload_size;
-        if(!fcc_lz4_read_u32(input, &payload_size)) goto cleanup;
-
-        bool uncompressed = (payload_size & 0x80000000U) != 0U;
-        payload_size &= 0x7FFFFFFFUL;
-        if(payload_size == 0U || payload_size > FCC_LZ4_COMPRESSED_BLOCK_MAX) goto cleanup;
-
-        uint64_t remaining = FCC_DB_EXPECTED_SIZE - written_total;
-        size_t expected_output_size =
-            remaining > FCC_LZ4_BLOCK_MAX ? FCC_LZ4_BLOCK_MAX : (size_t)remaining;
-        size_t output_size = 0;
-        if(uncompressed) {
-            if(payload_size != expected_output_size) goto cleanup;
-            if(!fcc_file_read_exact(input, decompressed, payload_size)) goto cleanup;
-            output_size = payload_size;
-        } else {
-            if(!fcc_file_read_exact(input, compressed, payload_size)) goto cleanup;
-            if(!fcc_lz4_decode_block(
-                   compressed, payload_size, decompressed, FCC_LZ4_BLOCK_MAX, &output_size)) {
-                goto cleanup;
-            }
-            if(output_size != expected_output_size) goto cleanup;
-        }
-
-        if(!fcc_file_write_exact(output, decompressed, output_size)) goto cleanup;
-        written_total += output_size;
-        if(progress && !progress(context, block_index + 1U, block_count)) goto cleanup;
-    }
-
-    if(written_total != FCC_DB_EXPECTED_SIZE) goto cleanup;
-    if(!storage_file_sync(output)) goto cleanup;
-
-    storage_file_close(output);
-    storage_common_remove(storage, FCC_DB_PATH);
-    ok = storage_common_rename(storage, FCC_DB_TMP_PATH, FCC_DB_PATH) == FSE_OK;
-
-cleanup:
-    if(output) {
-        if(storage_file_is_open(output)) storage_file_close(output);
-        storage_file_free(output);
-    }
-    if(input) {
-        if(storage_file_is_open(input)) storage_file_close(input);
-        storage_file_free(input);
-    }
-    if(!ok) storage_common_remove(storage, FCC_DB_TMP_PATH);
-    free(decompressed);
-    free(compressed);
-    return ok;
-}
-
 static void fcc_db_release_file(FccDb* db) {
     if(db->file) {
         if(storage_file_is_open(db->file)) storage_file_close(db->file);
@@ -635,7 +455,7 @@ static void fcc_db_release_file(FccDb* db) {
     db->cache_valid = false;
 }
 
-static bool fcc_db_open_cache(FccDb* db) {
+static bool fcc_db_open_file(FccDb* db) {
     db->file = storage_file_alloc(db->storage);
     if(!db->file) return false;
 
@@ -643,17 +463,18 @@ static bool fcc_db_open_cache(FccDb* db) {
         fcc_db_release_file(db);
         return false;
     }
-
     if(!fcc_db_read_header(db)) {
         fcc_db_release_file(db);
         return false;
     }
 
-    // Header validation probes the file; force a real seek on first lookup read.
+    // Header validation probes the file; reset sequential read position before normal lookup.
     db->position_valid = false;
     db->open = true;
     return true;
 }
+
+typedef bool (*FccDbPrepareProgressCallback)(void* context, uint32_t done, uint32_t total);
 
 static bool fcc_db_open_with_progress(
     FccDb* db,
@@ -663,13 +484,16 @@ static bool fcc_db_open_with_progress(
     db->storage = furi_record_open(RECORD_STORAGE);
     if(!db->storage) return false;
 
-    if(fcc_db_open_cache(db)) return true;
-
-    storage_common_remove(db->storage, FCC_DB_PATH);
-    if(fcc_db_prepare_cache(db->storage, progress, context) && fcc_db_open_cache(db)) {
+    if(progress && !progress(context, 0U, 1U)) goto fail;
+    if(fcc_db_open_file(db)) {
+        if(progress && !progress(context, 1U, 1U)) {
+            fcc_db_release_file(db);
+            goto fail;
+        }
         return true;
     }
 
+fail:
     furi_record_close(RECORD_STORAGE);
     memset(db, 0, sizeof(*db));
     return false;
@@ -1253,7 +1077,7 @@ static void fcc_show_prepare_status(FccApp* app) {
         snprintf(
             app->message_text,
             sizeof(app->message_text),
-            "Database preparation failed.\n\n"
+            "Database open failed.\n\n"
             "%s\n\n"
             "Ensure SD card space is available.",
             FCC_DB_SETUP_HINT);
@@ -1262,10 +1086,10 @@ static void fcc_show_prepare_status(FccApp* app) {
         snprintf(
             app->message_text,
             sizeof(app->message_text),
-            "Preparing database...\n\n"
-            "The first search may take\n"
-            "a few minutes.\n\n"
-            "Progress: %lu/%lu blocks\n"
+            "Opening database...\n\n"
+            "Search will continue when\n"
+            "the database is ready.\n\n"
+            "Progress: %lu/%lu steps\n"
             "%lu%% complete",
             (unsigned long)done,
             (unsigned long)total,
@@ -1274,9 +1098,9 @@ static void fcc_show_prepare_status(FccApp* app) {
         snprintf(
             app->message_text,
             sizeof(app->message_text),
-            "Preparing database...\n\n"
-            "The first search may take\n"
-            "a few minutes.\n\n"
+            "Opening database...\n\n"
+            "Search will continue when\n"
+            "the database is ready.\n\n"
             "Progress will appear soon.");
     }
 

@@ -28,9 +28,9 @@ UFBT_HOME_DIR="$PWD/.ufbt"
 PY="$PWD/.venv/bin/python"
 UFBT="$PWD/.venv/bin/ufbt"
 TARGET="/ext/apps/Tools/fcc_id_lookup.fap"
-DB_LOCAL="$PWD/files/fcc_freq_v2.fcz"
+DB_LOCAL="$PWD/files/fcc_freq_v2.bin"
 DB_TARGET_DIR="/ext/apps_data/fcc_id_lookup"
-DB_TARGET="$DB_TARGET_DIR/fcc_freq_v2.fcz"
+DB_TARGET="$DB_TARGET_DIR/fcc_freq_v2.bin"
 
 if [ ! -x "$PY" ]; then
     python3 -m venv .venv
@@ -142,9 +142,12 @@ with FlipperStorage(port) as storage:
 
     if mode == "fast-start":
         for stale_path in (
+            "/ext/apps_assets/fcc_id_lookup/fcc_freq_v2.bin",
             "/ext/apps_assets/fcc_id_lookup/fcc_freq_v2.fcz",
             "/ext/apps_assets/fcc_id_lookup/.assets.signature",
             "/ext/apps_assets/fcc_id_lookup",
+            "/ext/apps_data/fcc_id_lookup/fcc_freq_v2.fcz",
+            "/ext/apps_data/fcc_id_lookup/fcc_freq_v2_cache.bin",
         ):
             try:
                 storage.remove(stale_path)
@@ -168,8 +171,8 @@ PY
 
 echo "Installed FCC ID Lookup."
 if [ "$MODE" = "catalog" ]; then
-    echo "Mode: catalog bundled assets. First launch may wait while Flipper unpacks assets."
+    echo "Mode: catalog bundled assets. First launch may wait while Flipper unpacks the database asset."
 else
-    echo "Mode: fast-start sidecar. Splash should appear before database preparation."
+    echo "Mode: fast-start sidecar. Splash should appear quickly and searches read the sidecar directly."
 fi
 echo "Launch it from Apps > Tools > FCC ID Lookup on the Flipper."
