@@ -27,11 +27,11 @@ Data source: [FCCID.io](https://fccid.io). Example record source: https://fcc.id
 
 Install from the Flipper Apps Catalog, or connect one Flipper over USB and run ./deploy_to_flipper.sh.
 
-The deploy script creates a local .venv, downloads the uFBT SDK into .ufbt, builds the FAP, installs the app at /ext/apps/Tools/fcc_id_lookup.fap, and launches it.
+The deploy script creates a local .venv, downloads the uFBT SDK into .ufbt, builds the FAP, and installs the app at /ext/apps/Tools/fcc_id_lookup.fap. Launch the app from Apps > Tools > FCC ID Lookup on the Flipper.
 
 The script uses uFBT and storage auto-detection, so it works with whichever connected Flipper is visible to the tools. To force a specific serial port, run ./deploy_to_flipper.sh /dev/cu.usbmodemflip_XXXX1.
 
-The first launch after install unpacks the compressed asset. The first lookup may take longer while the app prepares its uncompressed cache.
+On launch, the app starts preparing the database cache in the background. If a search is submitted before the cache is ready, the app shows a preparation status page with progress when available.
 
 ## Database
 

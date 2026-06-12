@@ -158,7 +158,19 @@ typedef enum {
     FccViewList,
     FccViewDetail,
     FccViewMessage,
+    FccViewStatus,
 } FccView;
+
+typedef enum {
+    FccDbPrepIdle,
+    FccDbPrepPreparing,
+    FccDbPrepReady,
+    FccDbPrepError,
+} FccDbPrepState;
+
+typedef enum {
+    FccCustomEventDbPrep = 1,
+} FccCustomEvent;
 
 typedef enum {
     FccListActionPrev = 0xFFFFFFFEU,
@@ -174,6 +186,9 @@ typedef struct {
     Submenu* submenu;
     Widget* detail_widget;
     Widget* message_widget;
+    Widget* status_widget;
+    FuriThread* prep_thread;
+    FuriMutex* prep_mutex;
     FccView view;
     FccView detail_back_view;
     char input[FCC_INPUT_LEN];
@@ -183,6 +198,11 @@ typedef struct {
     char message_text[FCC_MESSAGE_TEXT_LEN];
     FccPrefixPage* page;
     uint32_t page_offset;
+    FccDbPrepState prep_state;
+    uint32_t prep_done;
+    uint32_t prep_total;
+    bool prep_cancel;
+    bool pending_search;
 } FccApp;
 
 static uint32_t fcc_le32(const uint8_t* data) {
@@ -509,7 +529,12 @@ static bool fcc_lz4_decode_block(
     return true;
 }
 
-static bool fcc_db_prepare_cache(Storage* storage) {
+typedef bool (*FccDbPrepareProgressCallback)(void* context, uint32_t done, uint32_t total);
+
+static bool fcc_db_prepare_cache(
+    Storage* storage,
+    FccDbPrepareProgressCallback progress,
+    void* context) {
     bool ok = false;
     File* input = storage_file_alloc(storage);
     File* output = storage_file_alloc(storage);
@@ -537,6 +562,7 @@ static bool fcc_db_prepare_cache(Storage* storage) {
     if(content_size != FCC_DB_EXPECTED_SIZE) goto cleanup;
     if(block_size != FCC_LZ4_BLOCK_MAX) goto cleanup;
     if(block_count == 0U) goto cleanup;
+    if(progress && !progress(context, 0, block_count)) goto cleanup;
 
     uint64_t written_total = 0;
     for(uint32_t block_index = 0; block_index < block_count; block_index++) {
@@ -566,6 +592,7 @@ static bool fcc_db_prepare_cache(Storage* storage) {
 
         if(!fcc_file_write_exact(output, decompressed, output_size)) goto cleanup;
         written_total += output_size;
+        if(progress && !progress(context, block_index + 1U, block_count)) goto cleanup;
     }
 
     if(written_total != FCC_DB_EXPECTED_SIZE) goto cleanup;
@@ -622,7 +649,10 @@ static bool fcc_db_open_cache(FccDb* db) {
     return true;
 }
 
-static bool fcc_db_open(FccDb* db) {
+static bool fcc_db_open_with_progress(
+    FccDb* db,
+    FccDbPrepareProgressCallback progress,
+    void* context) {
     memset(db, 0, sizeof(*db));
     db->storage = furi_record_open(RECORD_STORAGE);
     if(!db->storage) return false;
@@ -630,13 +660,17 @@ static bool fcc_db_open(FccDb* db) {
     if(fcc_db_open_cache(db)) return true;
 
     storage_common_remove(db->storage, FCC_DB_PATH);
-    if(fcc_db_prepare_cache(db->storage) && fcc_db_open_cache(db)) {
+    if(fcc_db_prepare_cache(db->storage, progress, context) && fcc_db_open_cache(db)) {
         return true;
     }
 
     furi_record_close(RECORD_STORAGE);
     memset(db, 0, sizeof(*db));
     return false;
+}
+
+static bool fcc_db_open(FccDb* db) {
+    return fcc_db_open_with_progress(db, NULL, NULL);
 }
 
 static void fcc_db_close(FccDb* db) {
@@ -1130,6 +1164,174 @@ static void fcc_show_message(FccApp* app, const char* message) {
     fcc_switch(app, FccViewMessage);
 }
 
+static void fcc_search_callback(void* context);
+
+static bool fcc_prep_lock(FccApp* app) {
+    return app->prep_mutex &&
+           furi_mutex_acquire(app->prep_mutex, FuriWaitForever) == FuriStatusOk;
+}
+
+static void fcc_prep_unlock(FccApp* app) {
+    if(app->prep_mutex) furi_mutex_release(app->prep_mutex);
+}
+
+static void fcc_prep_snapshot(
+    FccApp* app,
+    FccDbPrepState* state,
+    uint32_t* done,
+    uint32_t* total,
+    bool* cancel) {
+    if(fcc_prep_lock(app)) {
+        if(state) *state = app->prep_state;
+        if(done) *done = app->prep_done;
+        if(total) *total = app->prep_total;
+        if(cancel) *cancel = app->prep_cancel;
+        fcc_prep_unlock(app);
+    } else {
+        if(state) *state = app->prep_state;
+        if(done) *done = app->prep_done;
+        if(total) *total = app->prep_total;
+        if(cancel) *cancel = app->prep_cancel;
+    }
+}
+
+static void fcc_prep_set_state(
+    FccApp* app,
+    FccDbPrepState state,
+    uint32_t done,
+    uint32_t total,
+    bool notify) {
+    if(fcc_prep_lock(app)) {
+        app->prep_state = state;
+        app->prep_done = done;
+        app->prep_total = total;
+        fcc_prep_unlock(app);
+    } else {
+        app->prep_state = state;
+        app->prep_done = done;
+        app->prep_total = total;
+    }
+
+    if(notify && app->dispatcher) {
+        view_dispatcher_send_custom_event(app->dispatcher, FccCustomEventDbPrep);
+    }
+}
+
+static bool fcc_prep_is_ready(FccApp* app) {
+    FccDbPrepState state;
+    fcc_prep_snapshot(app, &state, NULL, NULL, NULL);
+    return state == FccDbPrepReady;
+}
+
+static bool fcc_db_prepare_progress_callback(void* context, uint32_t done, uint32_t total) {
+    FccApp* app = context;
+    bool cancel = false;
+    fcc_prep_snapshot(app, NULL, NULL, NULL, &cancel);
+    if(cancel) return false;
+
+    bool notify = (done == 0U) || (done == total) || ((done % 8U) == 0U);
+    fcc_prep_set_state(app, FccDbPrepPreparing, done, total, notify);
+    return true;
+}
+
+static void fcc_show_prepare_status(FccApp* app) {
+    FccDbPrepState state;
+    uint32_t done;
+    uint32_t total;
+    fcc_prep_snapshot(app, &state, &done, &total, NULL);
+
+    if(state == FccDbPrepReady) {
+        snprintf(app->message_text, sizeof(app->message_text), "Database ready.\n\nOpening search...");
+    } else if(state == FccDbPrepError) {
+        snprintf(
+            app->message_text,
+            sizeof(app->message_text),
+            "Database preparation failed.\n\n"
+            "Reinstall the app and ensure\n"
+            "SD card space is available.");
+    } else if(total > 0U) {
+        uint32_t percent = (uint32_t)(((uint64_t)done * 100ULL) / total);
+        snprintf(
+            app->message_text,
+            sizeof(app->message_text),
+            "Preparing database...\n\n"
+            "The first search may take\n"
+            "a few minutes.\n\n"
+            "Progress: %lu/%lu blocks\n"
+            "%lu%% complete",
+            (unsigned long)done,
+            (unsigned long)total,
+            (unsigned long)percent);
+    } else {
+        snprintf(
+            app->message_text,
+            sizeof(app->message_text),
+            "Preparing database...\n\n"
+            "The first search may take\n"
+            "a few minutes.\n\n"
+            "Progress will appear soon.");
+    }
+
+    widget_reset(app->status_widget);
+    widget_add_text_scroll_element(app->status_widget, 0, 0, 128, 64, app->message_text);
+    fcc_switch(app, FccViewStatus);
+}
+
+static int32_t fcc_db_prepare_thread(void* context) {
+    FccApp* app = context;
+    fcc_prep_set_state(app, FccDbPrepPreparing, 0, 0, true);
+    bool ok = fcc_db_open_with_progress(&app->db, fcc_db_prepare_progress_callback, app);
+
+    bool cancel = false;
+    fcc_prep_snapshot(app, NULL, NULL, NULL, &cancel);
+    if(cancel) return 1;
+
+    uint32_t total = 0;
+    fcc_prep_snapshot(app, NULL, NULL, &total, NULL);
+    fcc_prep_set_state(app, ok ? FccDbPrepReady : FccDbPrepError, total, total, true);
+    return ok ? 0 : 1;
+}
+
+static void fcc_start_db_prepare(FccApp* app) {
+    fcc_prep_set_state(app, FccDbPrepPreparing, 0, 0, false);
+    app->prep_thread = furi_thread_alloc_ex("FccDbPrep", 4096, fcc_db_prepare_thread, app);
+    if(!app->prep_thread) {
+        fcc_prep_set_state(app, FccDbPrepError, 0, 0, true);
+        return;
+    }
+
+    furi_thread_start(app->prep_thread);
+}
+
+static void fcc_stop_db_prepare(FccApp* app) {
+    if(fcc_prep_lock(app)) {
+        app->prep_cancel = true;
+        fcc_prep_unlock(app);
+    } else {
+        app->prep_cancel = true;
+    }
+
+    if(app->prep_thread) {
+        furi_thread_join(app->prep_thread);
+        furi_thread_free(app->prep_thread);
+        app->prep_thread = NULL;
+    }
+}
+
+static bool fcc_custom_event_callback(void* context, uint32_t event) {
+    FccApp* app = context;
+    if(event != FccCustomEventDbPrep) return false;
+
+    if(fcc_prep_is_ready(app) && app->pending_search) {
+        app->pending_search = false;
+        fcc_search_callback(app);
+    } else if(app->view == FccViewStatus) {
+        fcc_show_prepare_status(app);
+    }
+
+    return true;
+}
+
 static bool fcc_ensure_db_open(FccApp* app) {
     if(app->db.open) return true;
 
@@ -1251,6 +1453,13 @@ static void fcc_search_callback(void* context) {
         return;
     }
 
+    if(!fcc_prep_is_ready(app)) {
+        app->pending_search = true;
+        fcc_show_prepare_status(app);
+        return;
+    }
+
+    app->pending_search = false;
     if(!fcc_ensure_db_open(app)) return;
 
     FccLookupResult result;
@@ -1281,6 +1490,11 @@ static bool fcc_navigation_callback(void* context) {
         fcc_switch(app, FccViewList);
         return true;
     }
+    if(app->view == FccViewStatus) {
+        app->pending_search = false;
+        fcc_switch(app, FccViewInput);
+        return true;
+    }
     if(!app->db.open && app->view == FccViewMessage) return false;
     text_input_set_header_text(app->text_input, "FCC ID or prefix");
     fcc_switch(app, FccViewInput);
@@ -1300,25 +1514,30 @@ static FccApp* fcc_app_alloc(void) {
         view_dispatcher_enable_queue(app->dispatcher);
 #pragma GCC diagnostic pop
     }
+    app->prep_mutex = furi_mutex_alloc(FuriMutexTypeNormal);
     app->intro_view = view_alloc();
     app->text_input = text_input_alloc();
     app->submenu = submenu_alloc();
     app->detail_widget = widget_alloc();
     app->message_widget = widget_alloc();
+    app->status_widget = widget_alloc();
     if(!app->gui || !app->dispatcher || !app->intro_view || !app->text_input || !app->submenu ||
-       !app->detail_widget || !app->message_widget) {
+       !app->detail_widget || !app->message_widget || !app->status_widget || !app->prep_mutex) {
+        if(app->status_widget) widget_free(app->status_widget);
         if(app->message_widget) widget_free(app->message_widget);
         if(app->detail_widget) widget_free(app->detail_widget);
         if(app->submenu) submenu_free(app->submenu);
         if(app->text_input) text_input_free(app->text_input);
         if(app->intro_view) view_free(app->intro_view);
         if(app->dispatcher) view_dispatcher_free(app->dispatcher);
+        if(app->prep_mutex) furi_mutex_free(app->prep_mutex);
         if(app->gui) furi_record_close(RECORD_GUI);
         free(app);
         return NULL;
     }
 
     view_dispatcher_set_event_callback_context(app->dispatcher, app);
+    view_dispatcher_set_custom_event_callback(app->dispatcher, fcc_custom_event_callback);
     view_dispatcher_set_navigation_event_callback(app->dispatcher, fcc_navigation_callback);
     view_dispatcher_attach_to_gui(app->dispatcher, app->gui, ViewDispatcherTypeFullscreen);
 
@@ -1335,23 +1554,29 @@ static FccApp* fcc_app_alloc(void) {
     view_dispatcher_add_view(app->dispatcher, FccViewList, submenu_get_view(app->submenu));
     view_dispatcher_add_view(app->dispatcher, FccViewDetail, widget_get_view(app->detail_widget));
     view_dispatcher_add_view(app->dispatcher, FccViewMessage, widget_get_view(app->message_widget));
+    view_dispatcher_add_view(app->dispatcher, FccViewStatus, widget_get_view(app->status_widget));
 
     return app;
 }
 
 static void fcc_app_free(FccApp* app) {
+    fcc_stop_db_prepare(app);
+
     view_dispatcher_remove_view(app->dispatcher, FccViewIntro);
     view_dispatcher_remove_view(app->dispatcher, FccViewInput);
     view_dispatcher_remove_view(app->dispatcher, FccViewList);
     view_dispatcher_remove_view(app->dispatcher, FccViewDetail);
     view_dispatcher_remove_view(app->dispatcher, FccViewMessage);
+    view_dispatcher_remove_view(app->dispatcher, FccViewStatus);
 
     text_input_free(app->text_input);
     submenu_free(app->submenu);
     widget_free(app->detail_widget);
     widget_free(app->message_widget);
+    widget_free(app->status_widget);
     view_free(app->intro_view);
     view_dispatcher_free(app->dispatcher);
+    furi_mutex_free(app->prep_mutex);
     furi_record_close(RECORD_GUI);
     fcc_db_close(&app->db);
     free(app->page);
@@ -1364,6 +1589,7 @@ int32_t fcc_id_lookup_app(void* p) {
     FccApp* app = fcc_app_alloc();
     if(!app) return -1;
     fcc_switch(app, FccViewIntro);
+    fcc_start_db_prepare(app);
 
     view_dispatcher_run(app->dispatcher);
     fcc_app_free(app);
