@@ -6,6 +6,12 @@ Enter a full FCC ID or any non-empty prefix, browse matching FCC IDs, and open a
 
 Data source: [FCCID.io](https://fccid.io). Example record source: https://fcc.id/2A2V6-FZ.
 
+## Large Database Notice
+
+FCC ID Lookup includes a large offline database asset, currently about 8.9 MB. Catalog installation and first launch can take noticeably longer than small apps because Flipper must transfer and unpack the database asset before the app can use it.
+
+On first app use after install or update, opening the database may also take extra time. If a search is submitted before the database is ready, the app shows a status screen and continues once loading completes.
+
 ## Features
 
 - Full FCC ID lookup with exact-match precedence.
@@ -17,7 +23,7 @@ Data source: [FCCID.io](https://fccid.io). Example record source: https://fcc.id
 
 ## Install Modes
 
-The catalog-compatible build uses Flipper `fap_file_assets`, so `files/fcc_freq_v2.bin` is provided with the app and unpacked by Flipper on first launch or after asset updates. This is the supported self-contained data distribution path for catalog apps. A large database can still delay the first splash screen because Flipper unpacks app assets before the app entry point runs, but the app no longer creates a second raw cache after launch.
+The catalog-compatible build uses Flipper `fap_file_assets`, so `files/fcc_freq_v2.bin` is provided with the app and unpacked by Flipper on first launch or after asset updates. This is the supported self-contained data distribution path for catalog apps. The large database can delay installation and first launch because Flipper transfers and unpacks app assets before the app entry point runs, but the app no longer creates a second raw cache after launch.
 
 For local development and faster first-splash testing, run:
 
