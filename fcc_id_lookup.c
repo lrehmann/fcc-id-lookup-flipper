@@ -899,6 +899,7 @@ static FccApp* fcc_app_alloc(void) {
 
     app->gui = furi_record_open(RECORD_GUI);
     app->dispatcher = view_dispatcher_alloc();
+    view_dispatcher_enable_queue(app->dispatcher);
     app->intro_view = view_alloc();
     app->text_input = text_input_alloc();
     app->submenu = submenu_alloc();
