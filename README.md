@@ -4,7 +4,7 @@ Offline FCC ID applicant and frequency lookup for Flipper Zero.
 
 Enter a full FCC ID or any non-empty prefix, browse matching FCC IDs, and open a detail page with the applicant and supported frequency ranges. The app reads a compact FCCID.io-derived database from the Flipper SD card.
 
-Data source: [FCCID.io](https://fccid.io). Detail pages show the record source as https://fcc.id/{FCC_ID}.
+Data source: [FCCID.io](https://fccid.io). Example record source: https://fcc.id/2A2V6-FZ.
 
 ## Features
 

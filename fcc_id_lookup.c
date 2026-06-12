@@ -789,7 +789,7 @@ static void fcc_intro_draw_callback(Canvas* canvas, void* context) {
     canvas_clear(canvas);
     canvas_set_font(canvas, FontPrimary);
     canvas_draw_str_aligned(canvas, 90, 5, AlignCenter, AlignTop, "FCC ID Search");
-    canvas_draw_xbm(canvas, 2, 12, FCC_QR_CODE_WIDTH, FCC_QR_CODE_HEIGHT, fcc_qr_code_bits);
+    canvas_draw_xbm(canvas, 2, 8, FCC_QR_CODE_WIDTH, FCC_QR_CODE_HEIGHT, fcc_qr_code_bits);
 
     canvas_set_font(canvas, FontSecondary);
     canvas_draw_str_aligned(canvas, 90, 20, AlignCenter, AlignTop, "wireless");
