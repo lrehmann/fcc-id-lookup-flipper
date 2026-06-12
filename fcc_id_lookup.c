@@ -323,10 +323,16 @@ static bool fcc_db_open(FccDb* db) {
     db->storage = furi_record_open(RECORD_STORAGE);
     db->file = storage_file_alloc(db->storage);
     if(!storage_file_open(db->file, FCC_DB_PATH, FSAM_READ, FSOM_OPEN_EXISTING)) {
+        storage_file_free(db->file);
+        furi_record_close(RECORD_STORAGE);
+        memset(db, 0, sizeof(*db));
         return false;
     }
     if(!fcc_db_read_header(db)) {
         storage_file_close(db->file);
+        storage_file_free(db->file);
+        furi_record_close(RECORD_STORAGE);
+        memset(db, 0, sizeof(*db));
         return false;
     }
     db->open = true;
@@ -730,6 +736,21 @@ static void fcc_show_message(FccApp* app, const char* message) {
     fcc_switch(app, FccViewMessage);
 }
 
+static bool fcc_ensure_db_open(FccApp* app) {
+    if(app->db.open) return true;
+
+    if(fcc_db_open(&app->db)) return true;
+
+    FURI_LOG_E(TAG, "Missing or invalid database: %s", FCC_DB_PATH);
+    fcc_show_message(
+        app,
+        "Missing or invalid database.\n\n"
+        "Copy fcc_freq_v2.bin to:\n"
+        "/ext/apps_data/fcc_id_lookup/\n\n"
+        "Data from https://fccid.io");
+    return false;
+}
+
 static void fcc_show_detail(FccApp* app, const FccLookupResult* result, FccView back_view) {
     widget_reset(app->detail_widget);
     app->detail_text[0] = '\0';
@@ -830,6 +851,8 @@ static void fcc_search_callback(void* context) {
         return;
     }
 
+    if(!fcc_ensure_db_open(app)) return;
+
     FccLookupResult result;
     if(fcc_db_lookup(&app->db, app->input, &result)) {
         fcc_show_detail(app, &result, FccViewInput);
@@ -866,6 +889,7 @@ static bool fcc_navigation_callback(void* context) {
 
 static FccApp* fcc_app_alloc(void) {
     FccApp* app = malloc(sizeof(FccApp));
+    furi_check(app);
     memset(app, 0, sizeof(FccApp));
 
     app->gui = furi_record_open(RECORD_GUI);
@@ -919,15 +943,7 @@ int32_t fcc_id_lookup_app(void* p) {
     UNUSED(p);
 
     FccApp* app = fcc_app_alloc();
-    if(!fcc_db_open(&app->db)) {
-        FURI_LOG_E(TAG, "Missing or invalid database: %s", FCC_DB_PATH);
-        fcc_show_message(
-            app,
-            "Missing or invalid database.\n\nCopy fcc_freq_v2.bin to:\n"
-            "/ext/apps_data/fcc_id_lookup/\n\nData sourced from https://fccid.io");
-    } else {
-        fcc_switch(app, FccViewIntro);
-    }
+    fcc_switch(app, FccViewIntro);
 
     view_dispatcher_run(app->dispatcher);
     fcc_app_free(app);
