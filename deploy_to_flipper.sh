@@ -9,7 +9,8 @@ PY="$PWD/.venv/bin/python"
 UFBT="$PWD/.venv/bin/ufbt"
 SDK="$UFBT_HOME_DIR/current"
 DB_FILE="fcc_freq_v2.bin"
-DB_DEST="/ext/apps_data/fcc_id_lookup/$DB_FILE"
+DB_DIR="/ext/apps_data/fcc_id_lookup"
+DB_DEST="$DB_DIR/$DB_FILE"
 
 storage() {
     if [[ "$PORT" == "auto" ]]; then
@@ -27,11 +28,15 @@ launch_app() {
     fi
 }
 
+ensure_remote_dir() {
+    storage mkdir "$1" >/dev/null 2>&1 || true
+}
+
 if [[ ! -x "$PY" ]]; then
     python3 -m venv .venv
 fi
 
-if ! "$PY" -c 'import serial, colorlog, requests' >/dev/null 2>&1 || [[ ! -x "$UFBT" ]]; then
+if [[ ! -x "$UFBT" ]] || ! "$PY" -c 'import serial, colorlog, requests' >/dev/null 2>&1; then
     "$PY" -m pip install --upgrade pip ufbt colorlog pyserial requests
 fi
 
@@ -41,8 +46,8 @@ fi
 
 UFBT_HOME="$UFBT_HOME_DIR" "$UFBT" build
 
-storage mkdir /ext/apps_data || true
-storage mkdir /ext/apps_data/fcc_id_lookup || true
+ensure_remote_dir /ext/apps_data
+ensure_remote_dir "$DB_DIR"
 
 LOCAL_DB_SIZE="$(wc -c < "$DB_FILE" | tr -d ' ')"
 REMOTE_DB_SIZE="$(storage size "$DB_DEST" 2>/dev/null | tail -n 1 | tr -dc '0-9' || true)"

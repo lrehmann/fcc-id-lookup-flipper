@@ -22,16 +22,19 @@ Data is sourced from <https://fccid.io>.
 
 ## Deploy
 
-Connect the Flipper over USB, then run:
+Connect one Flipper over USB, then run:
 
 ```sh
 ./deploy_to_flipper.sh
 ```
 
-To force a specific serial port:
+By default the deploy script uses uFBT/storage auto-detection, so it works with
+whichever connected Flipper is visible to the tools. If more than one Flipper is
+connected, or auto-detection chooses the wrong device, pass an explicit serial
+port:
 
 ```sh
-./deploy_to_flipper.sh /dev/cu.usbmodemflip_Yuwabl1
+./deploy_to_flipper.sh /dev/cu.usbmodemflip_XXXX1
 ```
 
 The script installs a local `.venv`, downloads the uFBT SDK into `.ufbt`, builds the `.fap`, uploads `fcc_freq_v2.bin` to:
