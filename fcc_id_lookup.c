@@ -27,6 +27,7 @@
 #define FCC_DB_CRC_OFFSET 20U
 #define FCC_PREFIX3_COUNT 46656U
 #define FCC_PREFIX_INDEX_ENTRIES 46657U
+#define FCC_DB_READ_CACHE_SIZE 512U
 #define FCC_GRANTEE_TWO_OFFSET FCC_PREFIX3_COUNT
 #define FCC_APPLICANT_ESCAPE 31U
 
@@ -106,6 +107,10 @@ typedef struct {
     bool open;
     uint32_t position; // cached file read position, for seek elision
     bool position_valid;
+    uint8_t read_cache[FCC_DB_READ_CACHE_SIZE];
+    uint32_t cache_offset;
+    size_t cache_size;
+    bool cache_valid;
 } FccDb;
 
 typedef struct {
@@ -288,7 +293,40 @@ static bool fcc_db_read(FccDb* db, void* buffer, size_t size) {
 }
 
 static bool fcc_db_read_at(FccDb* db, uint32_t offset, void* buffer, size_t size) {
-    return fcc_db_seek(db, offset) && fcc_db_read(db, buffer, size);
+    uint8_t* output = buffer;
+    while(size > 0) {
+        if(db->cache_valid) {
+            uint32_t cache_end = db->cache_offset + (uint32_t)db->cache_size;
+            if(offset >= db->cache_offset && offset < cache_end) {
+                size_t available = cache_end - offset;
+                if(available > size) available = size;
+                memcpy(output, db->read_cache + (offset - db->cache_offset), available);
+                output += available;
+                offset += available;
+                size -= available;
+                continue;
+            }
+        }
+
+        if(size >= sizeof(db->read_cache)) {
+            return fcc_db_seek(db, offset) && fcc_db_read(db, output, size);
+        }
+
+        if(!fcc_db_seek(db, offset)) return false;
+        size_t cached = storage_file_read(db->file, db->read_cache, sizeof(db->read_cache));
+        if(cached == 0) {
+            db->position_valid = false;
+            db->cache_valid = false;
+            return false;
+        }
+
+        db->cache_offset = offset;
+        db->cache_size = cached;
+        db->cache_valid = true;
+        db->position += cached;
+    }
+
+    return true;
 }
 
 static bool fcc_db_read_u24_at(FccDb* db, uint64_t offset, uint32_t* value) {
@@ -402,10 +440,11 @@ static bool fcc_db_next_record(
     uint32_t* offset,
     uint32_t end,
     const char* bucket_prefix,
+    size_t bucket_prefix_length,
     FccRecord* record) {
     uint64_t id_length;
     if(!fcc_db_read_uleb(db, offset, end, &id_length)) return false;
-    size_t prefix_length = bucket_prefix ? strlen(bucket_prefix) : 0;
+    size_t prefix_length = bucket_prefix ? bucket_prefix_length : 0;
     if(id_length == 0 && prefix_length == 0) return false;
     if(prefix_length + id_length >= FCC_ID_LEN) return false;
     if(((uint64_t)*offset + id_length) > end) return false;
@@ -576,17 +615,22 @@ static bool fcc_db_scan_for_exact(
     uint32_t start,
     uint32_t end,
     const char* bucket_prefix,
+    size_t bucket_prefix_length,
     const char* key,
     FccLookupResult* result) {
     uint32_t offset = start;
     FccRecord record;
     while(offset < end) {
-        if(!fcc_db_next_record(db, &offset, end, bucket_prefix, &record)) return false;
+        if(!fcc_db_next_record(db, &offset, end, bucket_prefix, bucket_prefix_length, &record)) {
+            return false;
+        }
         char normalized[FCC_ID_LEN];
         fcc_normalize(record.id, normalized, sizeof(normalized));
-        if(strcmp(normalized, key) == 0) {
+        int compare = strcmp(normalized, key);
+        if(compare == 0) {
             return fcc_db_result_from_record(db, key, &record, result);
         }
+        if(compare > 0) return false;
     }
     return false;
 }
@@ -605,13 +649,13 @@ static bool fcc_db_lookup(FccDb* db, const char* input, FccLookupResult* result)
         uint32_t end = (uint32_t)db->header.record_offset + relative_end;
         char bucket_prefix[4];
         fcc_prefix3_from_code(code, bucket_prefix);
-        if(fcc_db_scan_for_exact(db, start, end, bucket_prefix, key, result)) return true;
+        if(fcc_db_scan_for_exact(db, start, end, bucket_prefix, 3, key, result)) return true;
     }
 
     if(db->header.overflow_record_size > 0) {
         uint32_t start = (uint32_t)db->header.overflow_record_offset;
         uint32_t end = start + (uint32_t)db->header.overflow_record_size;
-        if(fcc_db_scan_for_exact(db, start, end, NULL, key, result)) return true;
+        if(fcc_db_scan_for_exact(db, start, end, NULL, 0, key, result)) return true;
     }
 
     return false;
@@ -622,6 +666,7 @@ static bool fcc_db_prefix_page_scan(
     uint32_t start,
     uint32_t end,
     const char* bucket_prefix,
+    size_t bucket_prefix_length,
     const char* key,
     uint32_t* seen,
     uint32_t offset,
@@ -630,10 +675,16 @@ static bool fcc_db_prefix_page_scan(
     size_t key_length = strlen(key);
     FccRecord record;
     while(scan < end) {
-        if(!fcc_db_next_record(db, &scan, end, bucket_prefix, &record)) return false;
+        if(!fcc_db_next_record(db, &scan, end, bucket_prefix, bucket_prefix_length, &record)) {
+            return false;
+        }
         char normalized[FCC_ID_LEN];
         fcc_normalize(record.id, normalized, sizeof(normalized));
-        if(strncmp(normalized, key, key_length) != 0) continue;
+        int compare = strncmp(normalized, key, key_length);
+        if(compare != 0) {
+            if(compare > 0) return true;
+            continue;
+        }
         if((*seen)++ < offset) continue;
         if(page->count >= FCC_PAGE_SIZE) {
             page->has_more = true;
@@ -670,7 +721,7 @@ static bool fcc_db_prefix_page(
         uint32_t end = (uint32_t)db->header.record_offset + relative_end;
         char bucket_prefix[4];
         fcc_prefix3_from_code(code, bucket_prefix);
-        if(!fcc_db_prefix_page_scan(db, start, end, bucket_prefix, normalized, &seen, offset, page)) {
+        if(!fcc_db_prefix_page_scan(db, start, end, bucket_prefix, 3, normalized, &seen, offset, page)) {
             return false;
         }
     }
@@ -678,7 +729,7 @@ static bool fcc_db_prefix_page(
     if(!page->has_more && db->header.overflow_record_size > 0) {
         uint32_t start = (uint32_t)db->header.overflow_record_offset;
         uint32_t end = start + (uint32_t)db->header.overflow_record_size;
-        if(!fcc_db_prefix_page_scan(db, start, end, NULL, normalized, &seen, offset, page)) {
+        if(!fcc_db_prefix_page_scan(db, start, end, NULL, 0, normalized, &seen, offset, page)) {
             return false;
         }
     }
