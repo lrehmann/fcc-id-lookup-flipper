@@ -284,6 +284,11 @@ static bool fcc_db_seek(FccDb* db, uint32_t offset) {
 }
 
 static bool fcc_db_read(FccDb* db, void* buffer, size_t size) {
+    if(size > UINT32_MAX - db->position) {
+        db->position_valid = false;
+        return false;
+    }
+
     if(storage_file_read(db->file, buffer, size) != size) {
         db->position_valid = false; // short read leaves the position unknown
         return false;
@@ -295,6 +300,9 @@ static bool fcc_db_read(FccDb* db, void* buffer, size_t size) {
 static bool fcc_db_read_at(FccDb* db, uint32_t offset, void* buffer, size_t size) {
     uint8_t* output = buffer;
     while(size > 0) {
+        if(db->cache_valid && db->cache_size > UINT32_MAX - db->cache_offset) {
+            db->cache_valid = false;
+        }
         if(db->cache_valid) {
             uint32_t cache_end = db->cache_offset + (uint32_t)db->cache_size;
             if(offset >= db->cache_offset && offset < cache_end) {
@@ -319,6 +327,11 @@ static bool fcc_db_read_at(FccDb* db, uint32_t offset, void* buffer, size_t size
             db->cache_valid = false;
             return false;
         }
+        if(cached > UINT32_MAX - db->position) {
+            db->position_valid = false;
+            db->cache_valid = false;
+            return false;
+        }
 
         db->cache_offset = offset;
         db->cache_size = cached;
@@ -334,6 +347,14 @@ static bool fcc_db_read_u24_at(FccDb* db, uint64_t offset, uint32_t* value) {
     if(offset > UINT32_MAX) return false;
     if(!fcc_db_read_at(db, (uint32_t)offset, bytes, sizeof(bytes))) return false;
     *value = fcc_le24(bytes);
+    return true;
+}
+
+static bool fcc_db_range_valid(uint64_t offset, uint64_t size, uint64_t file_size) {
+    if(offset > file_size) return false;
+    if(size > file_size - offset) return false;
+    if(offset > UINT32_MAX) return false;
+    if(size > UINT32_MAX) return false;
     return true;
 }
 
@@ -371,13 +392,42 @@ static bool fcc_db_read_header(FccDb* db) {
     if(db->header.header_size != FCC_DB_HEADER_SIZE) return false;
     if(db->header.file_size != storage_file_size(db->file)) return false;
     if(db->header.file_size > UINT32_MAX) return false;
+    if(!fcc_db_range_valid(db->header.prefix_index_offset, FCC_PREFIX_INDEX_ENTRIES * 3ULL, db->header.file_size)) {
+        return false;
+    }
+    if(!fcc_db_range_valid(db->header.record_offset, db->header.record_size, db->header.file_size)) {
+        return false;
+    }
+    if(!fcc_db_range_valid(db->header.overflow_record_offset, db->header.overflow_record_size, db->header.file_size)) {
+        return false;
+    }
+    if(!fcc_db_range_valid(db->header.interval_offset, db->header.interval_size, db->header.file_size)) {
+        return false;
+    }
+    if(!fcc_db_range_valid(db->header.grantee_record_offset, db->header.grantee_record_size, db->header.file_size)) {
+        return false;
+    }
+    if(!fcc_db_range_valid(db->header.applicant_offset, db->header.applicant_size, db->header.file_size)) {
+        return false;
+    }
+    if(db->header.grantee_count > UINT32_MAX) return false;
+    if(db->header.grantee_count > UINT64_MAX / 6ULL) return false;
+    if(db->header.grantee_count * 6ULL > db->header.grantee_record_size) return false;
     return true;
 }
 
 static bool fcc_db_open(FccDb* db) {
     memset(db, 0, sizeof(*db));
     db->storage = furi_record_open(RECORD_STORAGE);
+    if(!db->storage) return false;
+
     db->file = storage_file_alloc(db->storage);
+    if(!db->file) {
+        furi_record_close(RECORD_STORAGE);
+        memset(db, 0, sizeof(*db));
+        return false;
+    }
+
     if(!storage_file_open(db->file, FCC_DB_PATH, FSAM_READ, FSOM_OPEN_EXISTING)) {
         storage_file_free(db->file);
         furi_record_close(RECORD_STORAGE);
@@ -462,6 +512,19 @@ static bool fcc_db_prefix_directory_value(FccDb* db, uint32_t code, uint32_t* va
     return fcc_db_read_u24_at(db, db->header.prefix_index_offset + (uint64_t)code * 3U, value);
 }
 
+static bool fcc_db_record_range(
+    FccDb* db,
+    uint32_t relative_start,
+    uint32_t relative_end,
+    uint32_t* start,
+    uint32_t* end) {
+    if(relative_start > relative_end) return false;
+    if(relative_end > db->header.record_size) return false;
+    *start = (uint32_t)db->header.record_offset + relative_start;
+    *end = (uint32_t)db->header.record_offset + relative_end;
+    return *start <= *end;
+}
+
 static bool fcc_db_code_range_for_prefix(
     const char* key,
     uint32_t* start_code,
@@ -487,8 +550,11 @@ static bool fcc_db_decode_intervals(FccDb* db, FccLookupResult* result, const Fc
     // region; keep the truncated 32-bit offset inside the file rather than
     // wrapping and decoding an unrelated part of the database.
     if(record->interval_offset > db->header.interval_size) return false;
-    uint32_t offset = (uint32_t)(db->header.interval_offset + record->interval_offset);
-    uint32_t end = (uint32_t)(db->header.interval_offset + db->header.interval_size);
+    uint64_t interval_start = db->header.interval_offset + record->interval_offset;
+    uint64_t interval_end = db->header.interval_offset + db->header.interval_size;
+    if(interval_start > UINT32_MAX || interval_end > UINT32_MAX) return false;
+    uint32_t offset = (uint32_t)interval_start;
+    uint32_t end = (uint32_t)interval_end;
     uint64_t previous_lower = 0;
     result->interval_count = 0;
     result->total_interval_count = record->interval_count;
@@ -520,7 +586,9 @@ static bool fcc_db_read_grantee_entry(
     uint32_t* code,
     uint32_t* applicant_offset) {
     if(index >= db->header.grantee_count) return false;
-    uint32_t offset = (uint32_t)db->header.grantee_record_offset + index * 6U;
+    uint64_t entry_offset = db->header.grantee_record_offset + (uint64_t)index * 6ULL;
+    if(entry_offset > UINT32_MAX) return false;
+    uint32_t offset = (uint32_t)entry_offset;
     if(!fcc_db_read_u24_at(db, offset, code)) return false;
     return fcc_db_read_u24_at(db, offset + 3U, applicant_offset);
 }
@@ -543,8 +611,11 @@ static bool fcc_db_read_applicant(FccDb* db, uint32_t relative_offset, char* out
     // A corrupt grantee entry could reference an applicant offset past the
     // applicant region; bail rather than read an unrelated string.
     if(relative_offset >= db->header.applicant_size) return false;
-    uint32_t offset = (uint32_t)db->header.applicant_offset + relative_offset;
-    uint32_t end = (uint32_t)(db->header.applicant_offset + db->header.applicant_size);
+    uint64_t applicant_start = db->header.applicant_offset + relative_offset;
+    uint64_t applicant_end = db->header.applicant_offset + db->header.applicant_size;
+    if(applicant_start > UINT32_MAX || applicant_end > UINT32_MAX) return false;
+    uint32_t offset = (uint32_t)applicant_start;
+    uint32_t end = (uint32_t)applicant_end;
 
     while(offset < end) {
         uint8_t byte;
@@ -645,8 +716,9 @@ static bool fcc_db_lookup(FccDb* db, const char* input, FccLookupResult* result)
         uint32_t relative_end;
         if(!fcc_db_prefix_directory_value(db, code, &relative_start)) return false;
         if(!fcc_db_prefix_directory_value(db, code + 1, &relative_end)) return false;
-        uint32_t start = (uint32_t)db->header.record_offset + relative_start;
-        uint32_t end = (uint32_t)db->header.record_offset + relative_end;
+        uint32_t start;
+        uint32_t end;
+        if(!fcc_db_record_range(db, relative_start, relative_end, &start, &end)) return false;
         char bucket_prefix[4];
         fcc_prefix3_from_code(code, bucket_prefix);
         if(fcc_db_scan_for_exact(db, start, end, bucket_prefix, 3, key, result)) return true;
@@ -717,8 +789,9 @@ static bool fcc_db_prefix_page(
         if(!fcc_db_prefix_directory_value(db, code, &relative_start)) return false;
         if(!fcc_db_prefix_directory_value(db, code + 1, &relative_end)) return false;
         if(relative_start == relative_end) continue;
-        uint32_t start = (uint32_t)db->header.record_offset + relative_start;
-        uint32_t end = (uint32_t)db->header.record_offset + relative_end;
+        uint32_t start;
+        uint32_t end;
+        if(!fcc_db_record_range(db, relative_start, relative_end, &start, &end)) return false;
         char bucket_prefix[4];
         fcc_prefix3_from_code(code, bucket_prefix);
         if(!fcc_db_prefix_page_scan(db, start, end, bucket_prefix, 3, normalized, &seen, offset, page)) {
@@ -1026,12 +1099,19 @@ static FccApp* fcc_app_alloc(void) {
 
     app->gui = furi_record_open(RECORD_GUI);
     app->dispatcher = view_dispatcher_alloc();
+    furi_check(app->dispatcher);
     view_dispatcher_enable_queue(app->dispatcher);
     app->intro_view = view_alloc();
     app->text_input = text_input_alloc();
     app->submenu = submenu_alloc();
     app->detail_widget = widget_alloc();
     app->message_widget = widget_alloc();
+    furi_check(app->gui);
+    furi_check(app->intro_view);
+    furi_check(app->text_input);
+    furi_check(app->submenu);
+    furi_check(app->detail_widget);
+    furi_check(app->message_widget);
 
     view_dispatcher_set_event_callback_context(app->dispatcher, app);
     view_dispatcher_set_navigation_event_callback(app->dispatcher, fcc_navigation_callback);
