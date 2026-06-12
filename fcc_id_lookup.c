@@ -701,6 +701,49 @@ static void fcc_format_frequency(uint64_t hz, char* output, size_t output_size) 
     }
 }
 
+static const char* fcc_frequency_suffix(char* formatted) {
+    char* separator = strrchr(formatted, ' ');
+    return separator ? separator + 1 : "";
+}
+
+static bool fcc_frequency_strip_suffix(char* formatted, const char* suffix) {
+    size_t formatted_len = strlen(formatted);
+    size_t suffix_len = strlen(suffix);
+    if(suffix_len == 0 || formatted_len <= suffix_len) return false;
+
+    size_t suffix_start = formatted_len - suffix_len;
+    if(formatted[suffix_start - 1] != ' ') return false;
+    if(strcmp(formatted + suffix_start, suffix) != 0) return false;
+
+    formatted[suffix_start - 1] = '\0';
+    return true;
+}
+
+static void fcc_format_frequency_range(
+    uint64_t lower_hz,
+    uint64_t upper_hz,
+    char* output,
+    size_t output_size) {
+    char lower[32];
+    char upper[32];
+    fcc_format_frequency(lower_hz, lower, sizeof(lower));
+    fcc_format_frequency(upper_hz, upper, sizeof(upper));
+
+    if(lower_hz == upper_hz) {
+        fcc_copy(output, lower, output_size);
+        return;
+    }
+
+    const char* lower_suffix = fcc_frequency_suffix(lower);
+    const char* upper_suffix = fcc_frequency_suffix(upper);
+    if(strcmp(lower_suffix, upper_suffix) == 0 && fcc_frequency_strip_suffix(lower, lower_suffix) &&
+       fcc_frequency_strip_suffix(upper, upper_suffix)) {
+        snprintf(output, output_size, "%s - %s %s", lower, upper, lower_suffix);
+    } else {
+        snprintf(output, output_size, "%s - %s", lower, upper);
+    }
+}
+
 static void fcc_switch(FccApp* app, FccView view) {
     app->view = view;
     view_dispatcher_switch_to_view(app->dispatcher, view);
@@ -756,19 +799,13 @@ static void fcc_show_detail(FccApp* app, const FccLookupResult* result, FccView 
     app->detail_text[0] = '\0';
     fcc_append(app->detail_text, sizeof(app->detail_text), "FCC ID: %s\n", result->fcc_id);
     fcc_append(app->detail_text, sizeof(app->detail_text), "Applicant:\n%s\n", result->applicant);
-    fcc_append(app->detail_text, sizeof(app->detail_text), "Grantee: %s\n\n", result->grantee_prefix);
-    fcc_append(app->detail_text, sizeof(app->detail_text), "Frequencies:\n");
+    fcc_append(app->detail_text, sizeof(app->detail_text), "Frequencies Supported:\n");
 
     for(uint32_t i = 0; i < result->interval_count; i++) {
-        char lower[32];
-        char upper[32];
-        fcc_format_frequency(result->intervals[i].lower_hz, lower, sizeof(lower));
-        fcc_format_frequency(result->intervals[i].upper_hz, upper, sizeof(upper));
-        if(result->intervals[i].lower_hz == result->intervals[i].upper_hz) {
-            fcc_append(app->detail_text, sizeof(app->detail_text), "%s\n", lower);
-        } else {
-            fcc_append(app->detail_text, sizeof(app->detail_text), "%s - %s\n", lower, upper);
-        }
+        char range[72];
+        fcc_format_frequency_range(
+            result->intervals[i].lower_hz, result->intervals[i].upper_hz, range, sizeof(range));
+        fcc_append(app->detail_text, sizeof(app->detail_text), "%s\n", range);
     }
     if(result->total_interval_count > result->interval_count) {
         fcc_append(
