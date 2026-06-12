@@ -4,7 +4,7 @@ Offline FCC ID applicant and frequency lookup for Flipper Zero.
 
 Enter a full FCC ID or any non-empty prefix, browse matching FCC IDs, and open a detail page with the applicant and supported frequency ranges. The app reads a compact FCCID.io-derived database from the Flipper SD card.
 
-Data source: [FCCID.io](https://fccid.io). Detail pages show the record source as `https://fcc.id/{FCC_ID}`.
+Data source: [FCCID.io](https://fccid.io). Detail pages show the record source as https://fcc.id/{FCC_ID}.
 
 ## Features
 
@@ -25,11 +25,11 @@ Data source: [FCCID.io](https://fccid.io). Detail pages show the record source a
 
 ## Install
 
-Run `./deploy_to_flipper.sh`.
+Run ./deploy_to_flipper.sh.
 
-The deploy script creates a local `.venv`, downloads the uFBT SDK into `.ufbt`, builds the FAP, uploads `fcc_freq_v2.bin` to `/ext/apps_data/fcc_id_lookup/fcc_freq_v2.bin`, installs the app at `/ext/apps/Tools/fcc_id_lookup.fap`, and launches it.
+The deploy script creates a local .venv, downloads the uFBT SDK into .ufbt, builds the FAP, uploads fcc_freq_v2.bin to /ext/apps_data/fcc_id_lookup/fcc_freq_v2.bin, installs the app at /ext/apps/Tools/fcc_id_lookup.fap, and launches it.
 
-The script uses uFBT and storage auto-detection, so it works with whichever connected Flipper is visible to the tools. To force a specific serial port, run `./deploy_to_flipper.sh /dev/cu.usbmodemflip_XXXX1`.
+The script uses uFBT and storage auto-detection, so it works with whichever connected Flipper is visible to the tools. To force a specific serial port, run ./deploy_to_flipper.sh /dev/cu.usbmodemflip_XXXX1.
 
 If a same-sized database is already present on the Flipper, the script skips the slow database upload.
 
@@ -39,17 +39,17 @@ The first install can be slow because USB serial storage upload to the Flipper i
 
 1. Power off or disconnect the Flipper.
 2. Remove the microSD card and mount it on your computer.
-3. On the SD card, create `apps_data/fcc_id_lookup`.
-4. Copy `fcc_freq_v2.bin` to `apps_data/fcc_id_lookup/fcc_freq_v2.bin`.
-5. Reinsert the SD card, connect the Flipper over USB, and run `./deploy_to_flipper.sh`.
+3. On the SD card, create apps_data/fcc_id_lookup.
+4. Copy fcc_freq_v2.bin to apps_data/fcc_id_lookup/fcc_freq_v2.bin.
+5. Reinsert the SD card, connect the Flipper over USB, and run ./deploy_to_flipper.sh.
 
 ## Database
 
-`fcc_freq_v2.bin` is stored on the SD card instead of inside the FAP.
+fcc_freq_v2.bin is stored on the SD card instead of inside the FAP.
 
 Current database:
 
 - Size: 8,930,222 bytes
 - SHA-256: 71ac86c6f0064c7c6dd0f934e4f9f38cf93c89316ce38bcabbb8aedb3186a6e3
 
-For catalog installs, the app binary can be installed from the catalog, but the offline database still needs to be copied to `/ext/apps_data/fcc_id_lookup/fcc_freq_v2.bin`.
+For catalog installs, the app binary can be installed from the catalog, but the offline database still needs to be copied to /ext/apps_data/fcc_id_lookup/fcc_freq_v2.bin.
