@@ -318,38 +318,6 @@ static bool fcc_db_read_header(FccDb* db) {
     return true;
 }
 
-static uint32_t fcc_crc32_step(uint32_t crc, uint8_t byte) {
-    crc ^= byte;
-    for(uint8_t bit = 0; bit < 8; bit++) {
-        crc = (crc & 1U) ? ((crc >> 1) ^ 0xEDB88320UL) : (crc >> 1);
-    }
-    return crc;
-}
-
-static bool fcc_db_verify_crc(FccDb* db) {
-    uint8_t buffer[512];
-    uint64_t remaining = db->header.file_size;
-    uint64_t file_offset = 0;
-    uint32_t crc = 0xFFFFFFFFUL;
-
-    if(!fcc_db_seek(db, 0)) return false;
-    while(remaining > 0) {
-        size_t chunk = remaining > sizeof(buffer) ? sizeof(buffer) : (size_t)remaining;
-        if(!fcc_db_read(db, buffer, chunk)) return false;
-        for(size_t i = 0; i < chunk; i++) {
-            uint64_t absolute = file_offset + i;
-            uint8_t byte = ((absolute >= FCC_DB_CRC_OFFSET) && (absolute < FCC_DB_CRC_OFFSET + 4)) ?
-                               0 :
-                               buffer[i];
-            crc = fcc_crc32_step(crc, byte);
-        }
-        file_offset += chunk;
-        remaining -= chunk;
-    }
-
-    return (crc ^ 0xFFFFFFFFUL) == db->header.crc32;
-}
-
 static bool fcc_db_open(FccDb* db) {
     memset(db, 0, sizeof(*db));
     db->storage = furi_record_open(RECORD_STORAGE);
@@ -357,7 +325,7 @@ static bool fcc_db_open(FccDb* db) {
     if(!storage_file_open(db->file, FCC_DB_PATH, FSAM_READ, FSOM_OPEN_EXISTING)) {
         return false;
     }
-    if(!fcc_db_read_header(db) || !fcc_db_verify_crc(db)) {
+    if(!fcc_db_read_header(db)) {
         storage_file_close(db->file);
         return false;
     }
@@ -823,13 +791,11 @@ static void fcc_show_list(FccApp* app) {
 }
 
 static bool fcc_load_prefix_page(FccApp* app, uint32_t offset) {
-    FccPrefixPage page;
     char normalized[FCC_ID_LEN];
-    if(!fcc_db_prefix_page(&app->db, app->input, offset, &page, normalized, sizeof(normalized))) {
+    if(!fcc_db_prefix_page(&app->db, app->input, offset, &app->page, normalized, sizeof(normalized))) {
         fcc_show_message(app, "Database read error.");
         return false;
     }
-    app->page = page;
     app->page_offset = offset;
     fcc_copy(app->normalized, normalized, sizeof(app->normalized));
     return true;
