@@ -11,6 +11,22 @@ SDK="$UFBT_HOME_DIR/current"
 DB_FILE="fcc_freq_v2.bin"
 DB_DEST="/ext/apps_data/fcc_id_lookup/$DB_FILE"
 
+storage() {
+    if [[ "$PORT" == "auto" ]]; then
+        "$PY" "$SDK/scripts/storage.py" "$@"
+    else
+        "$PY" "$SDK/scripts/storage.py" -p "$PORT" "$@"
+    fi
+}
+
+launch_app() {
+    if [[ "$PORT" == "auto" ]]; then
+        UFBT_HOME="$UFBT_HOME_DIR" "$UFBT" launch
+    else
+        UFBT_HOME="$UFBT_HOME_DIR" "$UFBT" launch FLIP_PORT="$PORT"
+    fi
+}
+
 if [[ ! -x "$PY" ]]; then
     python3 -m venv .venv
 fi
@@ -25,26 +41,19 @@ fi
 
 UFBT_HOME="$UFBT_HOME_DIR" "$UFBT" build
 
-STORAGE_PORT_ARGS=()
-UFBT_PORT_ARGS=()
-if [[ "$PORT" != "auto" ]]; then
-    STORAGE_PORT_ARGS=(-p "$PORT")
-    UFBT_PORT_ARGS=(FLIP_PORT="$PORT")
-fi
-
-"$PY" "$SDK/scripts/storage.py" "${STORAGE_PORT_ARGS[@]}" mkdir /ext/apps_data || true
-"$PY" "$SDK/scripts/storage.py" "${STORAGE_PORT_ARGS[@]}" mkdir /ext/apps_data/fcc_id_lookup || true
+storage mkdir /ext/apps_data || true
+storage mkdir /ext/apps_data/fcc_id_lookup || true
 
 LOCAL_DB_SIZE="$(wc -c < "$DB_FILE" | tr -d ' ')"
-REMOTE_DB_SIZE="$("$PY" "$SDK/scripts/storage.py" "${STORAGE_PORT_ARGS[@]}" size "$DB_DEST" 2>/dev/null | tail -n 1 | tr -dc '0-9' || true)"
+REMOTE_DB_SIZE="$(storage size "$DB_DEST" 2>/dev/null | tail -n 1 | tr -dc '0-9' || true)"
 
 if [[ "$REMOTE_DB_SIZE" == "$LOCAL_DB_SIZE" ]]; then
     echo "Database already present on Flipper ($LOCAL_DB_SIZE bytes); skipping upload."
 else
-    "$PY" "$SDK/scripts/storage.py" "${STORAGE_PORT_ARGS[@]}" send -f "$DB_FILE" "$DB_DEST"
+    storage send -f "$DB_FILE" "$DB_DEST"
 fi
 
-UFBT_HOME="$UFBT_HOME_DIR" "$UFBT" launch "${UFBT_PORT_ARGS[@]}"
+launch_app
 
 echo "Installed FCC ID Lookup."
 echo "Database: $DB_DEST"
