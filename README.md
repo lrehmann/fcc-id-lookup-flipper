@@ -14,10 +14,24 @@ Data is sourced from <https://fccid.io>.
 ## Screenshots
 
 ![Intro QR screen](screenshots/intro-qr.png)
+
+Startup screen with the FCC ID Lookup title, QR code, source URL, and search/exit controls.
+
 ![Empty search screen](screenshots/search-empty.png)
+
+Search input screen before entering an FCC ID or prefix.
+
 ![Prefix search screen](screenshots/search-prefix.png)
+
+Search input screen with a partial FCC ID prefix entered.
+
 ![Detail summary screen](screenshots/detail-summary.png)
+
+Detail screen showing the resolved FCC ID, applicant, and supported-frequency section.
+
 ![Detail frequencies screen](screenshots/detail-frequencies.png)
+
+Scrollable detail view showing supported frequency values and ranges.
 
 ## Files
 
