@@ -33,15 +33,25 @@ Fast-start mode builds a tiny FAP and uploads `files/fcc_freq_v2.bin` separately
 
 ## Screenshots
 
-[Intro QR screen](screenshots/intro-qr.png): launch page with QR code, project URL, and one-key prompt to start searching.
+![Intro QR screen](screenshots/intro-qr.png)
 
-[Empty search screen](screenshots/search-empty.png): FCC ID or prefix text input using the Flipper keyboard.
+Intro QR screen: launch page with QR code, project URL, and one-key prompt to start searching.
 
-[Prefix search screen](screenshots/search-prefix.png): example normalized prefix input before submitting a search.
+![Empty search screen](screenshots/search-empty.png)
 
-[Detail summary screen](screenshots/detail-summary.png): result page with FCC ID, applicant, and data-source URL.
+Empty search screen: FCC ID or prefix text input using the Flipper keyboard.
 
-[Frequency detail screen](screenshots/detail-frequencies.png): supported frequency list using compact unit formatting.
+![Prefix search screen](screenshots/search-prefix.png)
+
+Prefix search screen: normalized prefix search.
+
+![Detail summary screen](screenshots/detail-summary.png)
+
+Detail summary screen: result with FCC ID, applicant, and data-source URL.
+
+![Frequency detail screen](screenshots/detail-frequencies.png)
+
+Frequency detail screen: supported frequency list using compact unit formatting.
 
 ## Install
 
