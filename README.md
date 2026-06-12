@@ -2,7 +2,7 @@
 
 Offline FCC ID applicant and frequency lookup for Flipper Zero.
 
-Enter a full FCC ID or any non-empty prefix, browse matching FCC IDs, and open a detail page with the applicant and supported frequency ranges. The FCCID.io-derived database is bundled as a compressed app asset and expanded into an app-data cache on first use.
+Enter a full FCC ID or any non-empty prefix, browse matching FCC IDs, and open a detail page with the applicant and supported frequency ranges. The FCCID.io-derived database is available offline and expanded into an app-data cache on first use.
 
 Data source: [FCCID.io](https://fccid.io). Example record source: https://fcc.id/2A2V6-FZ.
 
@@ -13,7 +13,23 @@ Data source: [FCCID.io](https://fccid.io). Example record source: https://fcc.id
 - Paginated result lists for broad prefixes.
 - Applicant display on the detail page.
 - Supported frequency values formatted as Hz, kHz, MHz, GHz, or THz.
-- Bundled compressed offline database using Flipper app assets.
+- Bundled compressed offline database for catalog builds.
+
+## Install Modes
+
+The catalog-compatible build uses Flipper `fap_file_assets`, so the compressed database is provided with the app and unpacked by Flipper on first launch or after asset updates. This is the supported self-contained data distribution path for apps, but a large database can delay the first splash screen because unpacking happens before the app entry point runs.
+
+For local development and faster first-splash testing, run:
+
+```sh
+./deploy_to_flipper.sh --fast-start
+```
+
+Fast-start mode builds a tiny FAP and uploads `files/fcc_freq_v2.fcz` separately to `/ext/apps_data/fcc_id_lookup/fcc_freq_v2.fcz`. The app can draw the splash screen immediately and prepare the cache in the background. To install the exact catalog-style bundled-asset build locally, run:
+
+```sh
+./deploy_to_flipper.sh --catalog
+```
 
 ## Screenshots
 
@@ -35,7 +51,7 @@ On launch, the app starts preparing the database cache in the background. If a s
 
 ## Database
 
-files/fcc_freq_v2.fcz is packaged with the app through fap_file_assets and unpacked by Flipper to the FCC ID Lookup app assets folder. The app expands it into an uncompressed app-data cache named fcc_freq_v2_cache.bin for normal lookup speed.
+Catalog builds package `files/fcc_freq_v2.fcz` through `fap_file_assets` and Flipper unpacks it to the FCC ID Lookup app assets folder. Fast-start local deploys upload the same file as an app-data sidecar. In both modes, the app expands it into an uncompressed app-data cache named `fcc_freq_v2_cache.bin` for normal lookup speed.
 
 Current database:
 

@@ -20,7 +20,13 @@
 
 #define TAG "FccIdLookup"
 
-#define FCC_DB_ASSET_PATH APP_ASSETS_PATH("fcc_freq_v2.fcz")
+#ifdef FCC_SIDELOAD_DB
+#define FCC_DB_PACK_PATH APP_DATA_PATH("fcc_freq_v2.fcz")
+#define FCC_DB_SETUP_HINT "Run deploy_to_flipper.sh to install the database sidecar."
+#else
+#define FCC_DB_PACK_PATH APP_ASSETS_PATH("fcc_freq_v2.fcz")
+#define FCC_DB_SETUP_HINT "Reinstall the app to restore the bundled database."
+#endif
 #define FCC_DB_PATH APP_DATA_PATH("fcc_freq_v2_cache.bin")
 #define FCC_DB_TMP_PATH APP_DATA_PATH("fcc_freq_v2_cache.tmp")
 #define FCC_DB_PACK_MAGIC "FCCZLZ4"
@@ -546,7 +552,7 @@ static bool fcc_db_prepare_cache(
     storage_common_mkdir(storage, APP_DATA_PATH(""));
     storage_common_remove(storage, FCC_DB_TMP_PATH);
 
-    if(!storage_file_open(input, FCC_DB_ASSET_PATH, FSAM_READ, FSOM_OPEN_EXISTING)) goto cleanup;
+    if(!storage_file_open(input, FCC_DB_PACK_PATH, FSAM_READ, FSOM_OPEN_EXISTING)) goto cleanup;
     if(!storage_file_open(output, FCC_DB_TMP_PATH, FSAM_WRITE, FSOM_CREATE_ALWAYS)) goto cleanup;
 
     uint8_t pack_header[FCC_DB_PACK_HEADER_SIZE];
@@ -1248,8 +1254,9 @@ static void fcc_show_prepare_status(FccApp* app) {
             app->message_text,
             sizeof(app->message_text),
             "Database preparation failed.\n\n"
-            "Reinstall the app and ensure\n"
-            "SD card space is available.");
+            "%s\n\n"
+            "Ensure SD card space is available.",
+            FCC_DB_SETUP_HINT);
     } else if(total > 0U) {
         uint32_t percent = (uint32_t)(((uint64_t)done * 100ULL) / total);
         snprintf(
@@ -1339,12 +1346,15 @@ static bool fcc_ensure_db_open(FccApp* app) {
     if(fcc_db_open(&app->db)) return true;
 
     FURI_LOG_E(TAG, "Missing or invalid database: %s", FCC_DB_PATH);
-    fcc_show_message(
-        app,
+    snprintf(
+        app->message_text,
+        sizeof(app->message_text),
         "Missing or invalid database.\n\n"
-        "Reinstall the app and ensure\n"
-        "SD card space is available.\n\n"
-        "Data from https://fccid.io");
+        "%s\n\n"
+        "Ensure SD card space is available.\n\n"
+        "Data from https://fccid.io",
+        FCC_DB_SETUP_HINT);
+    fcc_switch(app, FccViewMessage);
     return false;
 }
 
