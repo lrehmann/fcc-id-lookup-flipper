@@ -104,6 +104,8 @@ typedef struct {
     File* file;
     FccDbHeader header;
     bool open;
+    uint32_t position; // cached file read position, for seek elision
+    bool position_valid;
 } FccDb;
 
 typedef struct {
@@ -263,11 +265,26 @@ static void fcc_copy(char* output, const char* input, size_t output_size) {
 }
 
 static bool fcc_db_seek(FccDb* db, uint32_t offset) {
-    return storage_file_seek(db->file, offset, true);
+    // The lookup paths read sequentially (ULEB streams, record ids, applicant
+    // strings), so the file is almost always already positioned correctly.
+    // Skip the storage_file_seek syscall when it would be a no-op.
+    if(db->position_valid && db->position == offset) return true;
+    if(!storage_file_seek(db->file, offset, true)) {
+        db->position_valid = false;
+        return false;
+    }
+    db->position = offset;
+    db->position_valid = true;
+    return true;
 }
 
 static bool fcc_db_read(FccDb* db, void* buffer, size_t size) {
-    return storage_file_read(db->file, buffer, size) == size;
+    if(storage_file_read(db->file, buffer, size) != size) {
+        db->position_valid = false; // short read leaves the position unknown
+        return false;
+    }
+    db->position += size;
+    return true;
 }
 
 static bool fcc_db_read_at(FccDb* db, uint32_t offset, void* buffer, size_t size) {
@@ -336,6 +353,8 @@ static bool fcc_db_open(FccDb* db) {
         memset(db, 0, sizeof(*db));
         return false;
     }
+    // Header parsing queried storage_file_size; force a real seek on first use.
+    db->position_valid = false;
     db->open = true;
     return true;
 }
@@ -435,7 +454,11 @@ static bool fcc_db_decode_intervals(FccDb* db, FccLookupResult* result, const Fc
     result->interval_count = 0;
     result->total_interval_count = record->interval_count;
 
-    for(uint64_t i = 0; i < record->interval_count; i++) {
+    // Only the first FCC_MAX_INTERVALS ranges are displayed; the rest are
+    // summarised from the header count, so stop reading once the buffer is
+    // full instead of decoding the entire (possibly long) interval block.
+    for(uint64_t i = 0; i < record->interval_count && result->interval_count < FCC_MAX_INTERVALS;
+        i++) {
         uint64_t lower_delta;
         uint64_t span;
         if(!fcc_db_read_scaled_uleb(db, &offset, end, &lower_delta)) return false;
@@ -445,11 +468,9 @@ static bool fcc_db_decode_intervals(FccDb* db, FccLookupResult* result, const Fc
         if(span > UINT64_MAX - lower) return false;
         uint64_t upper = lower + span;
         previous_lower = lower;
-        if(result->interval_count < FCC_MAX_INTERVALS) {
-            result->intervals[result->interval_count].lower_hz = lower;
-            result->intervals[result->interval_count].upper_hz = upper;
-            result->interval_count++;
-        }
+        result->intervals[result->interval_count].lower_hz = lower;
+        result->intervals[result->interval_count].upper_hz = upper;
+        result->interval_count++;
     }
     return true;
 }
@@ -606,12 +627,13 @@ static bool fcc_db_prefix_page_scan(
     uint32_t offset,
     FccPrefixPage* page) {
     uint32_t scan = start;
+    size_t key_length = strlen(key);
     FccRecord record;
     while(scan < end) {
         if(!fcc_db_next_record(db, &scan, end, bucket_prefix, &record)) return false;
         char normalized[FCC_ID_LEN];
         fcc_normalize(record.id, normalized, sizeof(normalized));
-        if(strncmp(normalized, key, strlen(key)) != 0) continue;
+        if(strncmp(normalized, key, key_length) != 0) continue;
         if((*seen)++ < offset) continue;
         if(page->count >= FCC_PAGE_SIZE) {
             page->has_more = true;
