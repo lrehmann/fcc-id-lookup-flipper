@@ -934,7 +934,8 @@ static bool fcc_db_scan_for_exact(
 
 static bool fcc_db_lookup(FccDb* db, const char* input, FccLookupResult* result) {
     char key[FCC_ID_LEN];
-    if(fcc_normalize(input, key, sizeof(key)) == 0) return false;
+    size_t key_length = fcc_normalize(input, key, sizeof(key));
+    if(key_length < 3) return false;
 
     uint32_t code;
     if(fcc_prefix3_code(key, &code)) {
