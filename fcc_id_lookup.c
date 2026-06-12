@@ -1289,23 +1289,34 @@ static bool fcc_navigation_callback(void* context) {
 
 static FccApp* fcc_app_alloc(void) {
     FccApp* app = malloc(sizeof(FccApp));
-    furi_check(app);
+    if(!app) return NULL;
     memset(app, 0, sizeof(FccApp));
 
     app->gui = furi_record_open(RECORD_GUI);
     app->dispatcher = view_dispatcher_alloc();
-    furi_check(app->dispatcher);
+    if(app->dispatcher) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+        view_dispatcher_enable_queue(app->dispatcher);
+#pragma GCC diagnostic pop
+    }
     app->intro_view = view_alloc();
     app->text_input = text_input_alloc();
     app->submenu = submenu_alloc();
     app->detail_widget = widget_alloc();
     app->message_widget = widget_alloc();
-    furi_check(app->gui);
-    furi_check(app->intro_view);
-    furi_check(app->text_input);
-    furi_check(app->submenu);
-    furi_check(app->detail_widget);
-    furi_check(app->message_widget);
+    if(!app->gui || !app->dispatcher || !app->intro_view || !app->text_input || !app->submenu ||
+       !app->detail_widget || !app->message_widget) {
+        if(app->message_widget) widget_free(app->message_widget);
+        if(app->detail_widget) widget_free(app->detail_widget);
+        if(app->submenu) submenu_free(app->submenu);
+        if(app->text_input) text_input_free(app->text_input);
+        if(app->intro_view) view_free(app->intro_view);
+        if(app->dispatcher) view_dispatcher_free(app->dispatcher);
+        if(app->gui) furi_record_close(RECORD_GUI);
+        free(app);
+        return NULL;
+    }
 
     view_dispatcher_set_event_callback_context(app->dispatcher, app);
     view_dispatcher_set_navigation_event_callback(app->dispatcher, fcc_navigation_callback);
@@ -1351,6 +1362,7 @@ int32_t fcc_id_lookup_app(void* p) {
     UNUSED(p);
 
     FccApp* app = fcc_app_alloc();
+    if(!app) return -1;
     fcc_switch(app, FccViewIntro);
 
     view_dispatcher_run(app->dispatcher);
