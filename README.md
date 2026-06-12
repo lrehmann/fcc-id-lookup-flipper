@@ -2,7 +2,7 @@
 
 Offline FCC ID applicant and frequency lookup for Flipper Zero.
 
-Enter a full FCC ID or any non-empty prefix, browse matching FCC IDs, and open a detail page with the applicant and supported frequency ranges. The FCCID.io-derived database is bundled with the app and unpacked to the Flipper app assets folder on launch.
+Enter a full FCC ID or any non-empty prefix, browse matching FCC IDs, and open a detail page with the applicant and supported frequency ranges. The FCCID.io-derived database is bundled as a compressed app asset and expanded into an app-data cache on first use.
 
 Data source: [FCCID.io](https://fccid.io). Example record source: https://fcc.id/2A2V6-FZ.
 
@@ -13,7 +13,7 @@ Data source: [FCCID.io](https://fccid.io). Example record source: https://fcc.id
 - Paginated result lists for broad prefixes.
 - Applicant display on the detail page.
 - Supported frequency values formatted as Hz, kHz, MHz, GHz, or THz.
-- Bundled offline database using Flipper app assets.
+- Bundled compressed offline database using Flipper app assets.
 
 ## Screenshots
 
@@ -31,13 +31,15 @@ The deploy script creates a local .venv, downloads the uFBT SDK into .ufbt, buil
 
 The script uses uFBT and storage auto-detection, so it works with whichever connected Flipper is visible to the tools. To force a specific serial port, run ./deploy_to_flipper.sh /dev/cu.usbmodemflip_XXXX1.
 
-The first app launch may take longer because Flipper unpacks the bundled database to the app assets folder.
+The first launch after install unpacks the compressed asset. The first lookup may take longer while the app prepares its uncompressed cache.
 
 ## Database
 
-files/fcc_freq_v2.bin is packaged with the app through fap_file_assets and unpacked by Flipper to the FCC ID Lookup app assets folder.
+files/fcc_freq_v2.fcz is packaged with the app through fap_file_assets and unpacked by Flipper to the FCC ID Lookup app assets folder. The app expands it into an uncompressed app-data cache named fcc_freq_v2_cache.bin for normal lookup speed.
 
 Current database:
 
-- Size: 8,930,222 bytes
-- SHA-256: 71ac86c6f0064c7c6dd0f934e4f9f38cf93c89316ce38bcabbb8aedb3186a6e3
+- Raw size: 8,930,222 bytes
+- Raw SHA-256: 71ac86c6f0064c7c6dd0f934e4f9f38cf93c89316ce38bcabbb8aedb3186a6e3
+- Packed asset size: 5,026,856 bytes
+- Packed asset SHA-256: 7224446aa6c3158a75702e50baa5c48df18925c76db486b1a016ccb9de7d3c49
