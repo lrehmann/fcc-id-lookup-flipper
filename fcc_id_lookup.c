@@ -710,14 +710,14 @@ static void fcc_intro_draw_callback(Canvas* canvas, void* context) {
     UNUSED(context);
     canvas_clear(canvas);
     canvas_set_font(canvas, FontPrimary);
-    canvas_draw_str_aligned(canvas, 88, 7, AlignCenter, AlignTop, "FCC ID Search");
-    canvas_draw_xbm(canvas, 4, 12, FCC_QR_CODE_WIDTH, FCC_QR_CODE_HEIGHT, fcc_qr_code_bits);
+    canvas_draw_str_aligned(canvas, 90, 5, AlignCenter, AlignTop, "FCC ID Search");
+    canvas_draw_xbm(canvas, 2, 12, FCC_QR_CODE_WIDTH, FCC_QR_CODE_HEIGHT, fcc_qr_code_bits);
 
     canvas_set_font(canvas, FontSecondary);
-    canvas_draw_str_aligned(canvas, 88, 25, AlignCenter, AlignTop, "wireless");
-    canvas_draw_str_aligned(canvas, 88, 35, AlignCenter, AlignTop, "frequency lookup");
-    canvas_draw_str_aligned(canvas, 88, 48, AlignCenter, AlignTop, "https://fcc.id");
-    canvas_draw_str_aligned(canvas, 64, 64, AlignCenter, AlignBottom, "(any key):search. Back:exit");
+    canvas_draw_str_aligned(canvas, 90, 20, AlignCenter, AlignTop, "wireless");
+    canvas_draw_str_aligned(canvas, 90, 30, AlignCenter, AlignTop, "frequency lookup");
+    canvas_draw_str_aligned(canvas, 90, 42, AlignCenter, AlignTop, "https://fcc.id");
+    canvas_draw_str_aligned(canvas, 64, 62, AlignCenter, AlignBottom, "OK:Search  Back:Exit");
 }
 
 static bool fcc_intro_input_callback(InputEvent* event, void* context) {
@@ -755,9 +755,9 @@ static void fcc_show_detail(FccApp* app, const FccLookupResult* result, FccView 
     widget_reset(app->detail_widget);
     app->detail_text[0] = '\0';
     fcc_append(app->detail_text, sizeof(app->detail_text), "FCC ID: %s\n", result->fcc_id);
-    fcc_append(app->detail_text, sizeof(app->detail_text), "Applicant: %s\n", result->applicant);
+    fcc_append(app->detail_text, sizeof(app->detail_text), "Applicant:\n%s\n", result->applicant);
     fcc_append(app->detail_text, sizeof(app->detail_text), "Grantee: %s\n\n", result->grantee_prefix);
-    fcc_append(app->detail_text, sizeof(app->detail_text), "Frequency ranges:\n");
+    fcc_append(app->detail_text, sizeof(app->detail_text), "Frequencies:\n");
 
     for(uint32_t i = 0; i < result->interval_count; i++) {
         char lower[32];
@@ -777,7 +777,7 @@ static void fcc_show_detail(FccApp* app, const FccLookupResult* result, FccView 
             "+%llu more ranges\n",
             (unsigned long long)(result->total_interval_count - result->interval_count));
     }
-    fcc_append(app->detail_text, sizeof(app->detail_text), "\nData sourced from https://fccid.io");
+    fcc_append(app->detail_text, sizeof(app->detail_text), "\nSource: fccid.io");
 
     widget_add_text_scroll_element(app->detail_widget, 0, 0, 128, 64, app->detail_text);
     app->detail_back_view = back_view;

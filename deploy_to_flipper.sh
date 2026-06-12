@@ -50,7 +50,15 @@ ensure_remote_dir /ext/apps_data
 ensure_remote_dir "$DB_DIR"
 
 LOCAL_DB_SIZE="$(wc -c < "$DB_FILE" | tr -d ' ')"
-REMOTE_DB_SIZE="$(storage size "$DB_DEST" 2>/dev/null | tail -n 1 | tr -dc '0-9' || true)"
+REMOTE_SIZE_OUTPUT="$(storage size "$DB_DEST" 2>&1)" || {
+    if printf '%s\n' "$REMOTE_SIZE_OUTPUT" | grep -Eiq 'not.exist|does not exist|not found|no such'; then
+        REMOTE_SIZE_OUTPUT=""
+    else
+        printf '%s\n' "$REMOTE_SIZE_OUTPUT" >&2
+        exit 1
+    fi
+}
+REMOTE_DB_SIZE="$(printf '%s\n' "$REMOTE_SIZE_OUTPUT" | tail -n 1 | tr -dc '0-9')"
 
 if [[ "$REMOTE_DB_SIZE" == "$LOCAL_DB_SIZE" ]]; then
     echo "Database already present on Flipper ($LOCAL_DB_SIZE bytes); skipping upload."

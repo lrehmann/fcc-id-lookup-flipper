@@ -11,13 +11,21 @@ The app lets you enter a full FCC ID or prefix, browse matching FCC IDs, and vie
 
 Data is sourced from <https://fccid.io>.
 
+## Screenshots
+
+![Intro QR screen](screenshots/intro-qr.png)
+![Empty search screen](screenshots/search-empty.png)
+![Prefix search screen](screenshots/search-prefix.png)
+![Detail summary screen](screenshots/detail-summary.png)
+![Detail frequencies screen](screenshots/detail-frequencies.png)
+
 ## Files
 
 - `application.fam` - uFBT external app manifest
 - `fcc_id_lookup.c` - Flipper app source
 - `fcc_qr_code.h` - startup QR bitmap
 - `fcc_id_lookup_icon.png` - 10x10 1-bit app icon
-- `fcc_freq_v2.bin` - compact offline FCC ID database
+- `fcc_freq_v2.bin` - compact FCC ID database
 - `deploy_to_flipper.sh` - build, upload database, install, and launch
 
 ## Deploy
@@ -37,7 +45,8 @@ port:
 ./deploy_to_flipper.sh /dev/cu.usbmodemflip_XXXX1
 ```
 
-The script installs a local `.venv`, downloads the uFBT SDK into `.ufbt`, builds the `.fap`, uploads `fcc_freq_v2.bin` to:
+The script installs a local `.venv`, downloads the uFBT SDK into `.ufbt`, builds
+the `.fap`, uploads `fcc_freq_v2.bin` to:
 
 ```text
 /ext/apps_data/fcc_id_lookup/fcc_freq_v2.bin
@@ -51,7 +60,7 @@ and launches the app from:
 
 If the same-sized database is already on the Flipper, the upload is skipped.
 
-### Faster database install
+## Faster Database Install
 
 First install can be slow because the FCC ID database is several megabytes and
 USB serial storage upload to the Flipper is not fast. The fastest install path
@@ -89,7 +98,8 @@ already present and the size matches, it skips the slow serial database upload.
 
 ## Database
 
-`fcc_freq_v2.bin` is a compact direct-access database. It is intentionally stored on the SD card instead of inside the `.fap`.
+`fcc_freq_v2.bin` is a compact direct-access database. It is intentionally
+stored on the SD card instead of inside the `.fap`.
 
 Current database:
 
