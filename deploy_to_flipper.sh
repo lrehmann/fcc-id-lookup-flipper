@@ -50,6 +50,8 @@ REMOTE_DB_SIZE="$(storage size "$DB_DEST" 2>/dev/null | tail -n 1 | tr -dc '0-9'
 if [[ "$REMOTE_DB_SIZE" == "$LOCAL_DB_SIZE" ]]; then
     echo "Database already present on Flipper ($LOCAL_DB_SIZE bytes); skipping upload."
 else
+    echo "Uploading database over Flipper serial storage. This can be slow on first install."
+    echo "Faster option: copy $DB_FILE directly to SD:/apps_data/fcc_id_lookup/ before running this script."
     storage send -f "$DB_FILE" "$DB_DEST"
 fi
 

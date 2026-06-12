@@ -48,6 +48,42 @@ and launches the app from:
 
 If the same-sized database is already on the Flipper, the upload is skipped.
 
+### Faster database install
+
+First install can be slow because the FCC ID database is several megabytes and
+USB serial storage upload to the Flipper is not fast. The fastest install path
+is to copy the database directly to the Flipper SD card, then run the deploy
+script to build and install the app.
+
+1. Power off or disconnect the Flipper.
+2. Remove the microSD card and mount it on your computer.
+3. On the SD card, create this directory if it does not already exist:
+
+```text
+apps_data/fcc_id_lookup
+```
+
+4. Copy this project file:
+
+```text
+fcc_freq_v2.bin
+```
+
+to this SD-card path:
+
+```text
+apps_data/fcc_id_lookup/fcc_freq_v2.bin
+```
+
+5. Reinsert the SD card, connect the Flipper over USB, and run:
+
+```sh
+./deploy_to_flipper.sh
+```
+
+The script checks the database size on the Flipper. If the SD-card copy is
+already present and the size matches, it skips the slow serial database upload.
+
 ## Database
 
 `fcc_freq_v2.bin` is a compact direct-access database. It is intentionally stored on the SD card instead of inside the `.fap`.
