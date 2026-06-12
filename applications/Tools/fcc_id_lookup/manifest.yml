@@ -4,7 +4,7 @@ sourcecode:
     origin: https://github.com/lrehmann/fcc-id-lookup-flipper.git
     commit_sha: 79e93c0d6c26201fef3775faad62c4b78f6a6026
 short_description: Offline FCC ID applicant and frequency lookup
-description: "@README.md"
+description: "@catalog_description.md"
 changelog: "@changelog.md"
 screenshots:
   - screenshots/intro-qr.png
