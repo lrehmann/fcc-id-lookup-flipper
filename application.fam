@@ -3,7 +3,7 @@ App(
     name="FCC ID Lookup",
     apptype=FlipperAppType.EXTERNAL,
     entry_point="fcc_id_lookup_app",
-    stack_size=8192,
+    stack_size=4096,
     fap_category="Tools",
     fap_version="0.1",
     fap_author="lsr",

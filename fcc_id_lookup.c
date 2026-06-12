@@ -166,7 +166,7 @@ typedef struct {
     char list_header[FCC_LIST_HEADER_LEN];
     char detail_text[FCC_DETAIL_TEXT_LEN];
     char message_text[FCC_MESSAGE_TEXT_LEN];
-    FccPrefixPage page;
+    FccPrefixPage* page;
     uint32_t page_offset;
 } FccApp;
 
@@ -800,11 +800,11 @@ static void fcc_show_list(FccApp* app) {
         submenu_add_item(app->submenu, "< Previous page", FccListActionPrev, fcc_list_callback, app);
     }
 
-    for(uint32_t i = 0; i < app->page.count; i++) {
-        submenu_add_item(app->submenu, app->page.items[i].id, i, fcc_list_callback, app);
+    for(uint32_t i = 0; i < app->page->count; i++) {
+        submenu_add_item(app->submenu, app->page->items[i].id, i, fcc_list_callback, app);
     }
 
-    if(app->page.has_more) {
+    if(app->page->has_more) {
         submenu_add_item(app->submenu, "Next page >", FccListActionNext, fcc_list_callback, app);
     }
 
@@ -813,7 +813,12 @@ static void fcc_show_list(FccApp* app) {
 
 static bool fcc_load_prefix_page(FccApp* app, uint32_t offset) {
     char normalized[FCC_ID_LEN];
-    if(!fcc_db_prefix_page(&app->db, app->input, offset, &app->page, normalized, sizeof(normalized))) {
+    if(!app->page) {
+        app->page = malloc(sizeof(FccPrefixPage));
+        furi_check(app->page);
+    }
+
+    if(!fcc_db_prefix_page(&app->db, app->input, offset, app->page, normalized, sizeof(normalized))) {
         fcc_show_message(app, "Database read error.");
         return false;
     }
@@ -833,10 +838,10 @@ static void fcc_list_callback(void* context, uint32_t index) {
         if(fcc_load_prefix_page(app, app->page_offset + FCC_PAGE_SIZE)) fcc_show_list(app);
         return;
     }
-    if(index >= app->page.count) return;
+    if(!app->page || index >= app->page->count) return;
 
     FccLookupResult result;
-    if(fcc_db_lookup(&app->db, app->page.items[index].id, &result)) {
+    if(fcc_db_lookup(&app->db, app->page->items[index].id, &result)) {
         fcc_show_detail(app, &result, FccViewList);
     } else {
         fcc_show_message(app, "Selected FCC ID was not found.");
@@ -860,10 +865,10 @@ static void fcc_search_callback(void* context) {
     }
 
     if(!fcc_load_prefix_page(app, 0)) return;
-    if(app->page.count == 0) {
+    if(app->page->count == 0) {
         fcc_show_message(app, "No matching FCC IDs.\n\nData sourced from https://fccid.io");
-    } else if(app->page.count == 1 && !app->page.has_more) {
-        if(fcc_db_lookup(&app->db, app->page.items[0].id, &result)) {
+    } else if(app->page->count == 1 && !app->page->has_more) {
+        if(fcc_db_lookup(&app->db, app->page->items[0].id, &result)) {
             fcc_show_detail(app, &result, FccViewInput);
         } else {
             fcc_show_message(app, "Matching FCC ID could not be loaded.");
@@ -936,6 +941,7 @@ static void fcc_app_free(FccApp* app) {
     view_dispatcher_free(app->dispatcher);
     furi_record_close(RECORD_GUI);
     fcc_db_close(&app->db);
+    free(app->page);
     free(app);
 }
 
